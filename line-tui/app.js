@@ -113,7 +113,7 @@ async function createApp(
     placeholderColor: theme.muted,
     selectionBg: theme.selectionBackground,
     selectionFg: theme.selectionForeground,
-    cursorColor: green,
+    cursorColor: theme.foreground,
   });
   const status = new Text(renderer, { content: '', fg: theme.foreground, height: 2 });
   const linkPicker = new Text(renderer, { content: '', fg: green, visible: false, maxHeight: 10 });
@@ -142,7 +142,7 @@ async function createApp(
     placeholderColor: theme.muted,
     selectionBg: theme.selectionBackground,
     selectionFg: theme.selectionForeground,
-    cursorColor: green,
+    cursorColor: theme.foreground,
   });
   pane.add(fileInput);
   const expandedView = new Box(renderer, {

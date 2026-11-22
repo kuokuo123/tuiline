@@ -88,10 +88,12 @@ test('UI keeps terminal color intent through focus, selections, overlays and rep
   assert.equal(text(2).attributes, TextAttributes.BOLD);
   setup.mockInput.pressKey('i');
   assert.equal(app.input.textColor.intent, 'default');
+  assert.equal(app.input.cursorColor.intent, 'default');
   assert.equal(app.input.backgroundColor.intent, 'default');
   assert.equal(text(2).fg.intent, 'default');
   assert.equal(text(2).attributes, 0);
   assert.equal(node('line-file-paths').textColor.intent, 'default');
+  assert.equal(node('line-file-paths').cursorColor.intent, 'default');
   assert.equal(node('line-mention-picker').fg.slot, 0);
   assert.equal(node('line-mention-picker').bg.slot, 4);
   const history = node('line-history');
