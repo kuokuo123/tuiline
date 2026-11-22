@@ -1,9 +1,9 @@
 'use strict';
 
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { homedir } = require('node:os');
+const { homedir, tmpdir } = require('node:os');
 const { pathToFileURL } = require('node:url');
 
 function run(file, args, signal) {
@@ -14,22 +14,59 @@ function run(file, args, signal) {
   });
 }
 
-// null means no usable picker; [] means the user canceled.
-async function pickFiles(signal, env = process.env, execute = run) {
-  if (!env.DISPLAY && !env.WAYLAND_DISPLAY) return null;
-  for (const [file, args] of [
-    ['zenity', ['--file-selection', '--multiple', '--separator=\n', '--title=Upload files to LINE']],
-    [
-      'kdialog',
-      ['--getopenfilename', homedir(), '*', '--multiple', '--separate-output', '--title', 'Upload files to LINE'],
-    ],
-  ]) {
-    const { error, stdout, stderr } = await execute(file, args, signal);
+function runPicker(args, signal, spawnPicker) {
+  return new Promise((resolve) => {
+    const child = spawnPicker('yazi', args, { stdio: 'inherit', signal });
+    let failure;
+    child.once('error', (error) => {
+      failure = error;
+    });
+    // Wait for close, even after an abort/error, before taking back the terminal.
+    child.once('close', (code, exitSignal) => resolve({ error: failure, code, exitSignal }));
+  });
+}
+
+// null means no usable picker; [] means the user canceled. Yazi writes one selected path per line.
+async function pickFiles(renderer, signal, { spawnPicker = spawn, temporaryRoot = tmpdir() } = {}) {
+  signal?.throwIfAborted();
+  const directory = await fs.mkdtemp(path.join(temporaryRoot, 'tuiline-chooser-'));
+  const chooser = path.join(directory, 'selected-files');
+  let suspended = false;
+  try {
     signal?.throwIfAborted();
-    if (!error) return stdout.split('\n').filter(Boolean);
-    if (error.code === 1 && !error.killed && !stderr?.trim()) return [];
+    if (renderer.isDestroyed) throw new DOMException('File selection canceled', 'AbortError');
+    renderer.suspend();
+    suspended = true;
+    let result;
+    try {
+      result = await runPicker(['--chooser-file', chooser], signal, spawnPicker);
+    } catch {
+      signal?.throwIfAborted();
+      return null;
+    }
+    signal?.throwIfAborted();
+    if (result.error) return null;
+    if (result.exitSignal || result.code === 130) return [];
+    if (result.code !== 0) return null;
+    let contents;
+    try {
+      contents = await fs.readFile(chooser, 'utf8');
+    } catch (error) {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    }
+    const files = contents.split('\n').filter(Boolean);
+    if (files.some((file) => !path.isAbsolute(file) || file.includes('\0'))) {
+      throw new Error('Yazi returned an invalid file path. No files were uploaded.');
+    }
+    return files;
+  } finally {
+    try {
+      if (suspended && !renderer.isDestroyed) renderer.resume();
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   }
-  return null;
 }
 
 async function downloadsDirectory(env = process.env, execute = run) {

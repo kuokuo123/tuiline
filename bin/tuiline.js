@@ -24,7 +24,7 @@ gg / G              jump to top / bottom
 g then x            open hyperlinks in the marked message
 Ctrl+R              refresh
 Ctrl+S              download selected attachment in scroll mode
-Ctrl+T              choose files and upload immediately
+Ctrl+T              choose files in Yazi (or enter paths) and upload immediately
 Ctrl+L              QR login / retry
 Ctrl+Y              confirm login
 Ctrl+X              cancel login

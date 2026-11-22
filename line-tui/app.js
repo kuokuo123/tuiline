@@ -351,7 +351,7 @@ async function createApp(
       fileInput.visible = true;
       input.blur();
       fileInput.focus();
-      transferNote = 'No file picker available. Enter file paths; quote paths containing spaces.';
+      transferNote = 'Yazi unavailable. Enter paths separated by spaces; quote paths containing spaces.';
       status.content = transferNote;
     });
   const closePaths = (files) => {
@@ -407,7 +407,7 @@ async function createApp(
     try {
       if (upload) {
         progress('Choose files to upload…');
-        let files = await chooseFiles(signal);
+        let files = await chooseFiles(renderer, signal);
         signal.throwIfAborted();
         files ??= await askPaths();
         signal.throwIfAborted();

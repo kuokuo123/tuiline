@@ -3,7 +3,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { mkdtemp, writeFile, readFile, rm } = require('node:fs/promises');
+const { spawn } = require('node:child_process');
+const { mkdtemp, writeFile, readFile, readdir, rm } = require('node:fs/promises');
 const { writeFileSync } = require('node:fs');
 const { tmpdir, homedir } = require('node:os');
 const path = require('node:path');
@@ -18,24 +19,121 @@ async function directory(t) {
   return dir;
 }
 
-test('file picker falls back, supports multiple paths, and distinguishes cancellation', async () => {
-  assert.equal(await pickFiles(undefined, {}, () => assert.fail()), null);
-  const calls = [];
-  const files = await pickFiles(undefined, { DISPLAY: ':0' }, async (file) => {
-    calls.push(file);
-    return file === 'zenity' ? { error: { code: 'ENOENT' } } : { stdout: '/one file\n/two\n' };
+for (const outcome of ['multiple', 'single', 'quit', 'empty', 'missing', 'denied', 'failed', 'interrupt', 'invalid']) {
+  test(`Yazi chooser restores the terminal and removes temporary paths: ${outcome}`, async (t) => {
+    const temporaryRoot = await directory(t);
+    const events = [];
+    const renderer = { suspend: () => events.push('suspend'), resume: () => events.push('resume') };
+    const spawnPicker = (file, args, options) => {
+      assert.equal(file, 'yazi');
+      assert.equal(args[0], '--chooser-file');
+      assert.equal(options.stdio, 'inherit');
+      assert.deepEqual(events, ['suspend']);
+      const child = new EventEmitter();
+      process.nextTick(() => {
+        if (outcome === 'multiple') writeFileSync(args[1], '/one file\n/two\n');
+        if (outcome === 'single') writeFileSync(args[1], '/one file\n');
+        if (outcome === 'empty') writeFileSync(args[1], '');
+        if (outcome === 'invalid') writeFileSync(args[1], 'not/an/absolute/path\n');
+        if (['missing', 'denied'].includes(outcome)) {
+          child.emit('error', { code: outcome === 'missing' ? 'ENOENT' : 'EACCES' });
+        }
+        events.push('close');
+        const code = outcome === 'failed' ? 1 : 0;
+        child.emit('close', outcome === 'interrupt' ? 130 : code);
+      });
+      return child;
+    };
+    const result = pickFiles(renderer, undefined, { spawnPicker, temporaryRoot });
+    if (outcome === 'invalid') {
+      await assert.rejects(result, /invalid file path/);
+    } else {
+      const expected = ['missing', 'denied', 'failed'].includes(outcome) ? null : [];
+      const files = await result;
+      if (outcome === 'multiple') assert.deepEqual(files, ['/one file', '/two']);
+      else if (outcome === 'single') assert.deepEqual(files, ['/one file']);
+      else assert.deepEqual(files, expected);
+    }
+    assert.deepEqual(events, ['suspend', 'close', 'resume']);
+    assert.deepEqual(await readdir(temporaryRoot), []);
   });
-  assert.deepEqual(calls, ['zenity', 'kdialog']);
+}
+
+test('Yazi spawn exceptions restore the UI and fall back to paths', async (t) => {
+  const temporaryRoot = await directory(t);
+  const events = [];
+  const renderer = { suspend: () => events.push('suspend'), resume: () => events.push('resume') };
+  const files = await pickFiles(renderer, undefined, {
+    temporaryRoot,
+    spawnPicker: () => {
+      throw new Error('Cannot launch');
+    },
+  });
+  assert.equal(files, null);
+  assert.deepEqual(events, ['suspend', 'resume']);
+  assert.deepEqual(await readdir(temporaryRoot), []);
+});
+
+for (const destroyed of [false, true]) {
+  test(`aborting Yazi waits for child close and does not resume a destroyed renderer: ${destroyed}`, async (t) => {
+    const temporaryRoot = await directory(t);
+    const controller = new AbortController();
+    const events = [];
+    const renderer = { isDestroyed: false, suspend: () => events.push('suspend'), resume: () => events.push('resume') };
+    const spawned = Promise.withResolvers();
+    const child = new EventEmitter();
+    const result = pickFiles(renderer, controller.signal, {
+      temporaryRoot,
+      spawnPicker: (_file, _args, options) => {
+        options.signal.addEventListener('abort', () => child.emit('error', new DOMException('Canceled', 'AbortError')));
+        spawned.resolve();
+        return child;
+      },
+    });
+    await spawned.promise;
+    renderer.isDestroyed = destroyed;
+    controller.abort();
+    assert.deepEqual(events, ['suspend']);
+    events.push('close');
+    child.emit('close', null, 'SIGTERM');
+    await assert.rejects(result, { name: 'AbortError' });
+    assert.deepEqual(events, destroyed ? ['suspend', 'close'] : ['suspend', 'close', 'resume']);
+    assert.deepEqual(await readdir(temporaryRoot), []);
+  });
+}
+
+test('an already canceled selection does not suspend the terminal or start Yazi', async () => {
+  const controller = new AbortController();
+  controller.abort();
+  await assert.rejects(pickFiles({ suspend: () => assert.fail() }, controller.signal), { name: 'AbortError' });
+});
+
+test('Yazi chooser reads paths from an actual child process without a shell', async (t) => {
+  const temporaryRoot = await directory(t);
+  const events = [];
+  const renderer = { suspend: () => events.push('suspend'), resume: () => events.push('resume') };
+  const files = await pickFiles(renderer, undefined, {
+    temporaryRoot,
+    spawnPicker: (_file, args, options) =>
+      spawn(
+        process.execPath,
+        ['-e', 'require("node:fs").writeFileSync(process.argv.at(-1), "/one file\\n/two\\n")', '--', ...args],
+        options,
+      ),
+  });
   assert.deepEqual(files, ['/one file', '/two']);
-  assert.deepEqual(await pickFiles(undefined, { DISPLAY: ':0' }, async () => ({ error: { code: 1 } })), []);
-  assert.equal(
-    await pickFiles(undefined, { DISPLAY: ':0' }, async () => ({ error: { code: 1 }, stderr: 'Cannot open display' })),
-    null,
-  );
+  assert.deepEqual(events, ['suspend', 'resume']);
+  assert.deepEqual(await readdir(temporaryRoot), []);
 });
 
 test('path prompt accepts quoted names, home paths and multiple files without shell execution', () => {
   assert.deepEqual(parsePaths('"~/my file" /tmp/two'), [path.join(homedir(), 'my file'), '/tmp/two']);
+  assert.deepEqual(parsePaths('~/photo.jpg "/home/me/my report.pdf" \'./another file.zip\''), [
+    path.join(homedir(), 'photo.jpg'),
+    '/home/me/my report.pdf',
+    path.resolve('another file.zip'),
+  ]);
+  assert.deepEqual(parsePaths('"/tmp/$(touch marker)" /tmp/*.zip'), ['/tmp/$(touch marker)', '/tmp/*.zip']);
   assert.throws(() => parsePaths('"unclosed'), /quote/);
   assert.deepEqual(parsePaths(''), []);
 });
@@ -136,7 +234,11 @@ test('Ctrl+S downloads the cursor-selected message; Ctrl+T falls back to a path 
   backend.close = () => {};
   const saved = [];
   const app = await createApp(setup.renderer, backend, {
-    pickFiles: async () => null,
+    pickFiles: async (renderer, signal) => {
+      assert.equal(renderer, setup.renderer);
+      assert.ok(signal instanceof AbortSignal);
+      return null;
+    },
     downloadFile: async (_backend, _context, message) => {
       saved.push(message.id);
       return '/Downloads/report.txt';
@@ -207,3 +309,50 @@ test('Ctrl+S downloads the cursor-selected message; Ctrl+T falls back to a path 
   assert.equal(prompt.visible, false);
   assert.equal(app.input.value, 'keep draft');
 });
+
+for (const canceled of [false, true]) {
+  test(
+    `Ctrl+T uploads Yazi selections immediately without showing the path prompt: canceled=${canceled}`,
+    { timeout: 5000 },
+    async (t) => {
+      const { createTestRenderer } = await import('@opentui/core/testing');
+      const { createApp } = require('../line-tui/app');
+      const dir = await directory(t);
+      const files = [path.join(dir, 'one file'), path.join(dir, 'two')];
+      await Promise.all(files.map((file) => writeFile(file, 'data')));
+      const setup = await createTestRenderer({ width: 100, height: 24, kittyKeyboard: true });
+      const backend = new EventEmitter();
+      const sent = Promise.withResolvers();
+      const commands = [];
+      const frame = {
+        ...state,
+        status: 'ready',
+        chats: [{ id: 'chat', name: 'Chat' }],
+        messages: [],
+        draft: 'keep draft',
+      };
+      backend.command = (command) => {
+        commands.push(command);
+        if (command.action === 'attach') backend.emit('state', { ...frame, attachment: { id: 'attachment' } });
+        if (command.action === 'send') {
+          backend.emit('state', { ...frame, sendStatus: 'pending', attachment: { id: 'attachment' } });
+          backend.emit('state', { ...frame, sendStatus: 'idle' });
+          if (commands.filter((item) => item.action === 'send').length === 2) sent.resolve();
+        }
+      };
+      backend.close = () => {};
+      const app = await createApp(setup.renderer, backend, { pickFiles: async () => (canceled ? [] : files) });
+      t.after(() => {
+        app.dispose();
+        setup.renderer.destroy();
+      });
+      backend.emit('state', frame);
+      setup.mockInput.pressKey('t', { ctrl: true });
+      if (!canceled) await sent.promise;
+      await setup.renderOnce();
+      assert.equal(setup.renderer.root.findDescendantById('line-file-paths').visible, false);
+      assert.equal(commands.filter((item) => item.action === 'send').length, canceled ? 0 : 2);
+      assert.equal(app.input.value, 'keep draft');
+    },
+  );
+}

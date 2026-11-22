@@ -76,12 +76,25 @@ does not publish one. The source-build instructions above work without npm publi
 File transfers support up to **20 MiB per file**. Ctrl+S saves the selected file,
 image, video, or audio attachment directly to your system Downloads folder (XDG),
 adding a numeric suffix when the filename already exists; existing files are never
-overwritten. Ctrl+T uses `zenity` or `kdialog` for multi-file selection when a desktop
-session is available. Install either picker for graphical selection. If neither is
-usable, enter paths in the terminal prompt, separated by spaces; quote paths that
-contain spaces, for example `"~/Documents/my report.pdf" ~/photo.jpg`. Press Enter
-to upload immediately, or Escape to cancel. Files are sent individually, preserving
-your text draft. An uncertain send stops the queue: check LINE before retrying.
+overwritten. Ctrl+T opens [Yazi](https://yazi-rs.github.io/docs/installation/) in the
+same terminal. With Yazi's default keybindings, press **Space** to select each file,
+then **Enter** to confirm and upload the selection immediately; press **q** to cancel.
+Tuiline restores its interface when Yazi closes. Yazi does not need a desktop session.
+
+If `yazi` is not installed on your `PATH` or cannot launch, enter paths in the
+terminal prompt. Separate multiple paths with spaces and quote names containing
+spaces, for example:
+
+```text
+~/photo.jpg "/home/me/Documents/my report.pdf" './another file.zip'
+```
+
+Absolute paths, relative paths (from tuiline's working directory), and `~/` paths
+are supported. Paths are literal: wildcards, environment variables, and shell
+commands are not expanded. Press Enter to upload immediately, or Escape to cancel
+the path prompt. Canceling Yazi does not open the path prompt. Files are sent
+individually, preserving your text draft. An uncertain send stops the queue:
+check LINE before retrying.
 Rebuild the backend with `npm run build:line` after updating.
 
 In a group chat, press `i` to type, then type `@` to list group members.
