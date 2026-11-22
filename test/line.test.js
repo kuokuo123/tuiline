@@ -3,8 +3,12 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { Backend, resolveBackend } = require('../line-tui/backend');
 const { createApp, clean } = require('../line-tui/app');
+const { loadHintsVisible } = require('../line-tui/preferences');
 
 test('LINE backend streams demo state and sends text without an account', async (t) => {
   let binary;
@@ -76,6 +80,202 @@ test('LINE UI places incoming messages left and own messages right', async (t) =
   const ownContent = setup.renderer.root.findDescendantById('line-message-0').getChildren()[1];
   assert.equal(ownContent.width, 40);
   assert.equal(ownContent.x + ownContent.width, history.viewport.x + history.viewport.width);
+});
+
+test('LINE media cache controls are scoped to a signed-in live account', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 100, height: 30 });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  backend.emit('state', {
+    mode: 'live',
+    account: { id: 'user', name: 'Me' },
+    mediaCacheEnabled: true,
+    mediaCacheBytes: 1048576,
+    autoImages: true,
+    chats: [],
+    messages: [],
+  });
+  await setup.renderOnce();
+  assert.match(setup.captureCharFrame(), /cached on 1 MiB · preview: auto/);
+  backend.emit('state', {
+    mode: 'live',
+    account: { id: 'user', name: 'Me' },
+    mediaCacheEnabled: false,
+    mediaCacheBytes: 0,
+    autoImages: false,
+    chats: [],
+    messages: [],
+  });
+  await setup.renderOnce();
+  assert.match(setup.captureCharFrame(), /cached off 0 MiB · preview: selected/);
+  setup.mockInput.pressKey('e', { ctrl: true });
+  setup.mockInput.pressKey('k', { ctrl: true });
+  assert.deepEqual(
+    commands.slice(-2).map(({ action }) => action),
+    ['media-cache-toggle', 'media-cache-clear'],
+  );
+  backend.emit('state', { mode: 'demo', account: {}, chats: [], messages: [] });
+  setup.mockInput.pressKey('e', { ctrl: true });
+  assert.equal(commands.length, 2);
+});
+
+test('LINE status and notes share one row unless a reply needs its banner', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 95, height: 20 });
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tuiline-status-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const backend = new EventEmitter();
+  backend.command = () => {};
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend, { hintsFile: path.join(directory, 'tuiline', 'hints-hidden') });
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const status = setup.renderer.root.findDescendantById('line-status');
+  const view = {
+    mode: 'demo',
+    statusText: '已連線',
+    sendNote: 'Cache cleared',
+    chats: [],
+    messages: [],
+  };
+  backend.emit('state', view);
+  await setup.renderOnce();
+  assert.equal(status.height, 1);
+  let lines = setup.captureCharFrame().split('\n');
+  const statusLine = lines.findIndex((line) => line.includes('已連線'));
+  assert.match(lines[statusLine], /已連線 · Cache cleared/);
+  assert.match(lines[statusLine + 1], /\^E cache/);
+  backend.emit('state', { ...view, sendNote: '', historyNote: 'History updated', sendStatus: 'pending' });
+  await setup.renderOnce();
+  lines = setup.captureCharFrame().split('\n');
+  assert.match(
+    lines.find((line) => line.includes('已連線')),
+    /已連線 · History updated · Sending…/,
+  );
+  backend.emit('state', {
+    ...view,
+    reply: { id: '1', sender: 'Alice', text: 'Reply target' },
+  });
+  await setup.renderOnce();
+  assert.equal(status.height, 2);
+  lines = setup.captureCharFrame().split('\n');
+  const replyLine = lines.findIndex((line) => line.includes('Reply to Alice'));
+  assert.match(lines[replyLine + 1], /已連線 · Cache cleared/);
+  assert.match(lines[replyLine + 2], /\^E cache/);
+});
+
+test('Ctrl+H reclaims the hint row and saves visibility independently of the media cache', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tuiline-hints-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const hintsFile = path.join(directory, 'tuiline', 'hints-hidden');
+  const makeApp = async () => {
+    const setup = await createTestRenderer({ width: 90, height: 18, kittyKeyboard: true });
+    const backend = new EventEmitter();
+    backend.command = () => {};
+    backend.close = () => {};
+    const app = await createApp(setup.renderer, backend, { hintsFile });
+    backend.emit('state', { mode: 'demo', chats: [], messages: [] });
+    await setup.renderOnce();
+    return { setup, app };
+  };
+  const first = await makeApp();
+  const hints = first.setup.renderer.root.findDescendantById('line-hints');
+  const history = first.setup.renderer.root.findDescendantById('line-history');
+  const height = history.viewport.height;
+  assert.equal(hints.visible, true);
+  assert.match(first.setup.captureCharFrame(), /\^E cache.*\^K clear.*\^P preview.*\^H hints.*\? help/);
+  first.setup.mockInput.pressKey('h', { ctrl: true });
+  await first.setup.renderOnce();
+  assert.equal(hints.visible, false);
+  assert.ok(history.viewport.height >= height + 1, 'hiding hints should enlarge the conversation viewport');
+  assert.equal(loadHintsVisible(hintsFile), false);
+  assert.equal(fs.statSync(hintsFile).mode & 0o777, 0o600);
+  first.app.dispose();
+  first.setup.renderer.destroy();
+  const second = await makeApp();
+  t.after(() => {
+    second.app.dispose();
+    second.setup.renderer.destroy();
+  });
+  const restoredHints = second.setup.renderer.root.findDescendantById('line-hints');
+  assert.equal(restoredHints.visible, false);
+  second.setup.mockInput.pressKey('h', { ctrl: true });
+  await second.setup.renderOnce();
+  assert.equal(restoredHints.visible, true);
+  assert.equal(loadHintsVisible(hintsFile), true);
+  second.setup.mockInput.pressKey('i');
+  second.setup.mockInput.pressKey('h', { ctrl: true });
+  assert.equal(restoredHints.visible, true, 'Ctrl+H must not toggle hints in insert mode');
+  second.setup.mockInput.pressKey('?');
+  assert.equal(second.setup.renderer.root.findDescendantById('line-keybind-help').visible, false);
+  assert.match(second.app.input.value, /\?$/, '? should remain ordinary text in insert mode');
+});
+
+test('keybind help scrolls with Vim and page keys without changing conversation state', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 80, height: 16, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  backend.emit('state', {
+    mode: 'demo',
+    selectedId: 'chat',
+    session: 'session',
+    chats: [],
+    messages: Array.from({ length: 25 }, (_, i) => ({ id: String(i + 1), text: `Message ${i + 1}` })),
+    draft: 'Unsent draft',
+  });
+  await setup.renderOnce();
+  setup.mockInput.pressEnter();
+  const history = setup.renderer.root.findDescendantById('line-history');
+  history.scrollTo(0);
+  await setup.renderOnce();
+  const top = history.scrollTop;
+  const draft = app.input.value;
+  setup.mockInput.pressKey('?');
+  await setup.renderOnce();
+  const help = setup.renderer.root.findDescendantById('line-keybind-help');
+  const scroll = setup.renderer.root.findDescendantById('line-keybind-scroll');
+  assert.equal(help.visible, true);
+  assert.match(setup.captureCharFrame(), /NAVIGATION/);
+  setup.mockInput.pressKey('j');
+  assert.ok(scroll.scrollTop > 0);
+  setup.mockInput.pressKey('f', { ctrl: true });
+  assert.ok(scroll.scrollTop > 1);
+  setup.mockInput.pressKey('b', { ctrl: true });
+  setup.mockInput.pressKey('d', { ctrl: true });
+  setup.mockInput.pressKey('u', { ctrl: true });
+  setup.mockInput.pressKey('pagedown');
+  setup.mockInput.pressKey('pageup');
+  setup.mockInput.pressKey('down');
+  setup.mockInput.pressKey('up');
+  setup.mockInput.pressKey('k');
+  setup.mockInput.pressEscape();
+  assert.equal(help.visible, false);
+  assert.equal(history.scrollTop, top);
+  assert.equal(app.input.value, draft);
+  assert.equal(commands.length, 0);
+  setup.mockInput.pressKey('?');
+  assert.equal(help.visible, true);
+  setup.mockInput.pressKey('?');
+  assert.equal(help.visible, false);
 });
 
 test('j reveals the complete last message', async (t) => {
@@ -420,6 +620,72 @@ test('selected photos and supplied stickers load as native terminal images; stal
   backend.emit('state', { ...view, selectedId: 'other', preview: png, previewMessageId: '2' });
   const stalePhoto = setup.renderer.root.findDescendantById('line-image-1');
   assert.equal(stalePhoto.visible, false);
+});
+
+test('automatic image previews follow the viewport and Ctrl+P switches to selected-only', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 100, height: 20, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const view = {
+    mode: 'live',
+    status: 'ready',
+    account: { id: 'account', name: 'Me' },
+    selectedId: 'chat',
+    session: 'session',
+    selection: 1,
+    autoImages: true,
+    chats: [],
+    messages: Array.from({ length: 30 }, (_, i) => ({
+      id: String(i + 1),
+      text: `Photo ${i + 1}`,
+      contentType: 1,
+      downloadable: true,
+    })),
+  };
+  backend.emit('state', view);
+  await setup.renderOnce();
+  const initial = commands.filter(({ action }) => action === 'photos-visible').at(-1)?.messageIds;
+  assert.ok(initial?.length > 0 && initial.length <= 8, 'only visible images should be requested');
+  const history = setup.renderer.root.findDescendantById('line-history');
+  history.scrollTo(0);
+  await setup.renderOnce();
+  const older = commands.filter(({ action }) => action === 'photos-visible').at(-1)?.messageIds;
+  assert.ok(older?.length > 0 && older.length <= 8);
+  assert.notDeepEqual(older, initial, 'scrolling should request the new viewport');
+  const png =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1Pe' +
+    'AAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC';
+  const thumbnail = { [older[0]]: { status: 'ready', data: png } };
+  backend.emit('state', { ...view, photoThumbnails: thumbnail });
+  const photo = setup.renderer.root.findDescendantById(`line-image-${Number(older[0]) - 1}`);
+  assert.equal(photo.visible, true, 'a cached thumbnail should display without hovering');
+  setup.mockInput.pressEnter();
+  assert.equal(commands.filter(({ action }) => action === 'preview').length, 0);
+  setup.mockInput.pressKey('p', { ctrl: true });
+  assert.deepEqual(
+    commands.slice(-2).map(({ action }) => action),
+    ['auto-images', 'photos-hide'],
+  );
+  backend.emit('state', { ...view, autoImages: false, photoThumbnails: thumbnail });
+  await setup.renderOnce();
+  assert.equal(photo.visible, false);
+  const before = commands.filter(({ action }) => action === 'photos-visible').length;
+  history.scrollTo(history.scrollHeight);
+  await setup.renderOnce();
+  assert.equal(commands.filter(({ action }) => action === 'photos-visible').length, before);
+  setup.mockInput.pressKey('p', { ctrl: true });
+  assert.equal(commands.at(-1).action, 'auto-images');
+  backend.emit('state', view);
+  await setup.renderOnce();
+  assert.ok(commands.filter(({ action }) => action === 'photos-visible').length > before);
 });
 
 test('full-page and half-page scrolling work inside a single long message', async (t) => {

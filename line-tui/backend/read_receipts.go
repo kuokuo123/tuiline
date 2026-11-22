@@ -37,6 +37,14 @@ func (e *Engine) receiveRead(event WatchEvent) {
 		return
 	}
 	e.readUntil[event.ChatID] = event.MessageID
+	if e.historyStore != nil {
+		rows := e.historyStore.load(e.state.Account.ID, event.ChatID)
+		e.applyReadReceipts(event.ChatID, rows)
+		e.cacheHistory(event.ChatID, rows)
+		if e.state.SelectedID == event.ChatID {
+			e.historyCached = rows
+		}
+	}
 	if e.state.SelectedID == event.ChatID {
 		e.applyReadReceipts(event.ChatID, e.state.Messages)
 	}

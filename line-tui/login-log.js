@@ -1,9 +1,13 @@
 'use strict';
 
-const { appendFileSync } = require('node:fs');
+const { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, writeSync } = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
-function createLoginLog({ file = path.resolve('tuiline-login.log'), now = () => new Date() } = {}) {
+const loginLogPath = (cacheHome = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache')) =>
+  path.join(cacheHome, 'tuiline', 'tuiline-login.log');
+
+function createLoginLog({ file = loginLogPath(), now = () => new Date() } = {}) {
   const entries = [];
   let previous = '';
   let writeError = '';
@@ -25,7 +29,26 @@ function createLoginLog({ file = path.resolve('tuiline-login.log'), now = () => 
       entries.push(line);
       if (entries.length > 100) entries.shift();
       try {
-        appendFileSync(file, `${line}\n`, { mode: 0o600 });
+        const directory = path.dirname(file);
+        mkdirSync(directory, { recursive: true, mode: 0o700 });
+        const dirInfo = lstatSync(directory);
+        if (!dirInfo.isDirectory() || (dirInfo.mode & 0o777) !== 0o700) {
+          throw new Error('Login log directory is not private');
+        }
+        const fd = openSync(
+          file,
+          constants.O_WRONLY | constants.O_APPEND | constants.O_CREAT | (constants.O_NOFOLLOW || 0),
+          0o600,
+        );
+        try {
+          const info = fstatSync(fd);
+          if (!info.isFile() || (info.mode & 0o777) !== 0o600) {
+            throw new Error('Login log file is not private');
+          }
+          writeSync(fd, `${line}\n`);
+        } finally {
+          closeSync(fd);
+        }
       } catch (error) {
         writeError = error.code || 'write failed';
       }
@@ -39,4 +62,4 @@ function createLoginLog({ file = path.resolve('tuiline-login.log'), now = () => 
   };
 }
 
-module.exports = { createLoginLog };
+module.exports = { createLoginLog, loginLogPath };

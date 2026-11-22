@@ -2,10 +2,19 @@
 
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { mkdtempSync, readFileSync, rmSync } = require('node:fs');
+const {
+  chmodSync,
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { createLoginLog } = require('../line-tui/login-log');
+const { createLoginLog, loginLogPath } = require('../line-tui/login-log');
 
 test('login progress is saved and printed after exit without QR, PIN, or account data', (t) => {
   const dir = mkdtempSync(path.join(os.tmpdir(), 'tuiline-login-log-'));
@@ -67,4 +76,42 @@ test('unwritable login log retains diagnostics for the terminal', () => {
   });
   assert.match(output, /登入失敗/);
   assert.match(output, /Could not write login log/);
+});
+
+test('login log defaults to a private XDG cache directory, not the working directory', (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'tuiline-login-cache-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const previous = process.env.XDG_CACHE_HOME;
+  process.env.XDG_CACHE_HOME = dir;
+  let logger;
+  try {
+    logger = createLoginLog();
+  } finally {
+    if (previous === undefined) delete process.env.XDG_CACHE_HOME;
+    else process.env.XDG_CACHE_HOME = previous;
+  }
+  logger.record({ login: { stage: 'phone', statusText: 'Checking login' } });
+  const file = loginLogPath(dir);
+  assert.equal(path.dirname(file), path.join(dir, 'tuiline'));
+  assert.ok(existsSync(file));
+  assert.equal(lstatSync(path.dirname(file)).mode & 0o777, 0o700);
+  assert.equal(lstatSync(file).mode & 0o777, 0o600);
+  assert.match(readFileSync(file, 'utf8'), /Checking login/);
+});
+
+test('login log refuses unsafe files instead of following a symlink', (t) => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'tuiline-login-unsafe-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const target = path.join(dir, 'target');
+  const file = path.join(dir, 'login.log');
+  writeFileSync(target, 'keep');
+  symlinkSync(target, file);
+  const logger = createLoginLog({ file });
+  logger.record({ login: { stage: 'error', statusText: 'No login' } });
+  assert.equal(readFileSync(target, 'utf8'), 'keep');
+  rmSync(file);
+  writeFileSync(file, 'private?', { mode: 0o600 });
+  chmodSync(file, 0o644);
+  logger.record({ login: { stage: 'uncertain', statusText: 'Still no login' } });
+  assert.equal(readFileSync(file, 'utf8'), 'private?');
 });

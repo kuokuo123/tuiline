@@ -23,6 +23,8 @@ try {
     'pkg/line/client.go',
     'internal/gui/locale.go',
     'internal/gui/images.go',
+    'internal/gui/photos.go',
+    'internal/gui/stickers.go',
   ]) {
     const original = path.resolve(source, 'backend', name);
     const patched = path.join(temporary, name.replaceAll('/', '-'));
@@ -35,6 +37,14 @@ try {
   replace[path.resolve(source, 'backend/internal/gui/tuiline_read_receipts.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/read_receipts.go',
+  );
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_history_cache.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/history_cache.go',
+  );
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_media_cache.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/media_cache.go',
   );
   const testing = process.argv.includes('--test');
   replace[path.resolve(source, 'backend/internal/gui/tuiline_sticker_cache.go')] = path.resolve(
@@ -54,6 +64,14 @@ try {
     '../line-tui/backend/gui_download_progress.go',
   );
   if (testing) {
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_history_cache_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/history_cache_test.go',
+    );
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_media_cache_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/media_cache_test.go',
+    );
     replace[path.resolve(source, 'backend/internal/gui/tuiline_sticker_cache_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/sticker_cache_test.go',

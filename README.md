@@ -1,4 +1,6 @@
-# tuiline — LINE in your terminal
+# tuiline — LINE in terminal
+
+> This is an AI generated application and will not be actively maintained. It is intended to have minimal usability without spending much of my time, as a result of being forced to use it by workplace culture.
 
 Original repo from [tuigram](https://github.com/leonid-shutov/tuigram)
 ![tuiline showing LINE chats and the sticker picker](screenshot-tuiline.png)
@@ -50,6 +52,7 @@ does not publish one. The source-build instructions above work without npm publi
 | Key                      | Action                                                          |
 | ------------------------ | --------------------------------------------------------------- |
 | Up/Down, j/k             | Select a sidebar chat or move the message cursor in scroll mode |
+| k at first / j at last   | Load the previous / next saved 100-message history page         |
 | h / l                    | Leave / enter conversation focus (outside insert mode)          |
 | Tab                      | Switch sidebar / conversation scroll mode                       |
 | Enter from sidebar       | Focus conversation in scroll mode                               |
@@ -66,6 +69,11 @@ does not publish one. The source-build instructions above work without npm publi
 | PageUp/PageDown          | Scroll loaded history                                           |
 | g then x                 | Open links in the marked message; pick a link if several        |
 | Ctrl+R                   | Refresh                                                         |
+| Ctrl+E                   | Enable/disable persistent media caching                         |
+| Ctrl+K                   | Clear saved media (not chat history or Downloads)               |
+| Ctrl+P                   | Toggle automatic inline image previews                          |
+| Ctrl+H outside insert    | Hide/show bottom keybind hints                                  |
+| ? outside insert         | Open scrollable keybind help; ? or Escape closes it             |
 | Ctrl+S in scroll mode    | Save the selected attachment to your system Downloads folder    |
 | Ctrl+T                   | Pick files and upload them immediately to the current chat      |
 | Ctrl+L                   | Start or retry QR login                                         |
@@ -109,12 +117,16 @@ reference backend, including its Secret Service requirements. This client uses
 the same saved account as that backend. Avoid simultaneous clients using the
 same session if the backend reports it is locked.
 
-Login progress and failure messages are saved to `./tuiline-login.log`.
+Login progress and failure messages are saved to
+`$XDG_CACHE_HOME/tuiline/tuiline-login.log` (normally
+`~/.cache/tuiline/tuiline-login.log`), with private directory and file
+permissions. Existing logs in the working directory are not moved; remove
+them manually if no longer needed.
 Press `Ctrl+C` to quit and print the recent login diagnostics in the terminal,
-or watch them from another terminal in the repository directory:
+or watch them from another terminal:
 
 ```sh
-tail -F ./tuiline-login.log
+tail -F "${XDG_CACHE_HOME:-$HOME/.cache}/tuiline/tuiline-login.log"
 ```
 
 The log excludes PINs, QR data, credentials, and chat contents.
@@ -123,8 +135,21 @@ This version supports listing chats, loading the latest history, text sending,
 live incoming updates, and terminal image rendering. In scroll mode, the `›`
 marker identifies the selected message; `l`/`L` opens links from that message.
 Uppercase `J`/`K`/`H`/`L` also work for navigation.
-Selecting an image message loads its inline PNG/JPEG preview (up to 2 MiB and
-4096×4096). Sticker images supplied by the backend render inline automatically.
+By default, visible photo messages load sanitized thumbnails automatically (up to
+two concurrent downloads); scrolling away stops queued requests. Press `Ctrl+P`
+to switch to selected-image-only previews and back. The header shows
+`preview: auto` or `preview: selected`, and the choice persists per account.
+Full-size PNG/JPEG previews (up to 2 MiB and 4096×4096) load only when opened.
+Sticker images supplied by the backend render inline automatically.
+The header also shows `cached on/off` and media-cache usage. Press `Ctrl+H`
+outside insert mode to reclaim the bottom hints row; the setting persists across
+restarts in `$XDG_CACHE_HOME/tuiline/hints-hidden` (normally
+`~/.cache/tuiline/hints-hidden`), independently of whether media caching is
+enabled. An existing private hint setting in `~/.config/tuiline/` is migrated
+automatically, and the old directory is removed if empty. Press `?`
+outside insert mode for the complete, scrollable keybind list. It supports
+`j`/`k`, arrow keys, PageUp/PageDown, and Ctrl+B/F/U/D; `?` or Escape closes it
+without changing the conversation selection or draft.
 Press `s` outside insert mode to browse owned sticker packs in a compact four-column
 thumbnail grid. Use `h`/`l` to move left/right and `j`/`k` to move down/up;
 arrow keys also work. The grid scrolls to keep the highlight visible. Use
@@ -155,11 +180,42 @@ when LINE supplies the total size, a percentage. Escape cancels the download.
 
 Outgoing messages show `✓` after sending and `✓✓` when a live read receipt is
 observed. In groups, this means at least one other member has read the message.
-Receipts are session-local; older reads are not inferred from history. The TUI
+Live read receipts are saved with cached messages; older reads not observed by
+this client cannot be inferred from LINE. The TUI
 does not automatically mark incoming messages as read.
 
 Attachment sending, reactions, and message actions have no
-TUI controls yet. History is limited to 100 messages per chat. The local build
+TUI controls yet. LINE currently returns only the latest 100 messages for a chat;
+older messages are saved when this client observes them over time, **not**
+backfilled from the server. The complete observed text history is stored per
+account under `$XDG_CACHE_HOME/tuiline/history/` (normally
+`~/.cache/tuiline/history/`) and shown 100 messages at a time. On opening a chat,
+cached messages appear while the latest server page loads; server edits and
+deletions in that page replace stale cache entries. A 64 MiB per-chat file limit
+and 512 MiB per-account budget evict older chat files when necessary. These
+files contain **decrypted message text in plaintext** with private directory
+(0700) and file (0600) permissions; they are not encrypted. Remove that
+directory to erase saved conversations. Images and attachments are not stored
+in this history cache.
+
+Processed avatars, stickers, photo thumbnails and images expanded on demand
+are cached separately in `$XDG_CACHE_HOME/tuiline/media/` (normally
+`~/.cache/tuiline/media/`), isolated by account. The app checks memory, then
+disk, then downloads. Avatar picture paths and sticker package/version/hash
+changes cause new cache keys; previews are keyed by chat and message ID.
+Owned sticker-pack metadata can appear while the app refreshes it from LINE;
+the cached list cannot authorize sending before that refresh succeeds.
+Original photos, videos, audio and other attachments are **not** cached
+automatically. Successful unsend operations remove that message's saved
+thumbnail and expanded preview. Media files are stored **unencrypted** with
+private directory (0700) and file (0600) permissions. The default limit is
+512 MiB per account; least-recently-used assets are evicted and media unused
+for 90 days expires. Set `TUILINE_MEDIA_CACHE_MB` to an integer from 1 to 2048
+to change the limit. The header shows cache usage; Ctrl+E persists the
+enable/disable choice and Ctrl+K clears saved media without deleting text
+history or explicitly downloaded files. Already displayed images remain in
+memory until the conversation changes or tuiline exits. Signing out does not
+erase saved media; clear it explicitly if needed. The local build
 supports 5,000 chats. Drafts live in memory.
 Uncertain sends are shown and blocked from
 automatic resending; check LINE and refresh before deliberately trying again.

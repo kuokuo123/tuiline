@@ -8,6 +8,7 @@ const { createMentionPicker } = require('./mentions');
 const { createLoginLog } = require('./login-log');
 const { terminalTheme } = require('./theme');
 const { pickFiles, parsePaths, uploadFiles, downloadFile } = require('./files');
+const { loadHintsVisible, saveHintsVisible } = require('./preferences');
 
 // Remote strings are plain text; strip terminal control bytes before display.
 // eslint-disable-next-line no-control-regex
@@ -21,6 +22,7 @@ async function createApp(
     playVideo: playback = playVideo,
     pickFiles: chooseFiles = pickFiles,
     downloadFile: saveFile = downloadFile,
+    hintsFile,
   } = {},
 ) {
   const { default: stringWidth } = await import('string-width');
@@ -84,7 +86,9 @@ async function createApp(
   history.add(emptyMessages);
   let messageRows = [];
   let messageCursor = 0;
+  let pendingHistoryPage = 0;
   let openAtBottom = false;
+  let visiblePhotosKey = '';
   root.renderBefore = () => {
     if (openAtBottom) {
       history.scrollTo(history.scrollHeight);
@@ -115,13 +119,26 @@ async function createApp(
     selectionFg: theme.selectionForeground,
     cursorColor: theme.foreground,
   });
-  const status = new Text(renderer, { content: '', fg: theme.foreground, height: 2 });
-  const linkPicker = new Text(renderer, { content: '', fg: green, visible: false, maxHeight: 10 });
-  const hints = new Text(renderer, {
-    content:
-      ' CHATS · j/k select · l/Enter conversation · i insert · l links/media · s stickers · ^R refresh · ^C quit',
-    fg: green,
+  const status = new Text(renderer, {
+    id: 'line-status',
+    content: '',
+    fg: theme.foreground,
     height: 1,
+    width: '100%',
+    wrapMode: 'none',
+    truncate: true,
+  });
+  const linkPicker = new Text(renderer, { content: '', fg: green, visible: false, maxHeight: 10 });
+  const hintsVisible = loadHintsVisible(hintsFile);
+  const hints = new Text(renderer, {
+    id: 'line-hints',
+    content: ' CHATS · j/k move · Enter open · ^E cache · ^K clear · ^P preview · ^H hints · ? help',
+    fg: green,
+    height: hintsVisible ? 1 : 0,
+    visible: hintsVisible,
+    width: '100%',
+    wrapMode: 'none',
+    truncate: true,
   });
   pane.add(history);
   pane.add(loginImage);
@@ -239,6 +256,78 @@ async function createApp(
   root.add(body);
   root.add(status);
   root.add(hints);
+  const helpView = new Box(renderer, {
+    id: 'line-keybind-help',
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    width: '100%',
+    height: '100%',
+    flexDirection: 'column',
+    backgroundColor: theme.background,
+    visible: false,
+    zIndex: 12,
+  });
+  helpView.add(new Text(renderer, { content: ' KEYBINDS', height: 1, fg: green }));
+  const helpScroll = new ScrollBox(renderer, {
+    id: 'line-keybind-scroll',
+    flexGrow: 1,
+    minHeight: 0,
+    scrollX: false,
+    scrollbarOptions: theme.scrollbar,
+  });
+  helpScroll.add(
+    new Text(renderer, {
+      content: [
+        ' NAVIGATION',
+        ' j/k or Up/Down          Select a chat or message',
+        ' h / l, Tab              Leave / enter conversation',
+        ' Enter                   Open a chat',
+        ' gg / G                  Jump to first / last',
+        ' k/j at history edge     Previous / next saved page',
+        ' Ctrl+B/F                Scroll back / forward one page',
+        ' Ctrl+U/D                Scroll back / forward half a page',
+        ' PageUp/PageDown         Scroll the conversation',
+        '',
+        ' COMPOSING',
+        ' i                       Insert mode',
+        ' Enter (insert)          Send text',
+        ' Escape (insert)         Return to scroll mode',
+        ' r (scroll)              Reply to selected message',
+        ' @ (insert)              Search group mentions',
+        ' s                       Browse stickers',
+        ' g then x                Open links in selected message',
+        '',
+        ' MEDIA & CACHE',
+        ' l (on media)            Open image / play video',
+        ' Ctrl+S                  Save selected attachment',
+        ' Ctrl+T                  Upload files',
+        ' Ctrl+P                  Toggle automatic image previews',
+        ' Ctrl+E                  Enable / disable disk media cache',
+        ' Ctrl+K                  Clear saved media',
+        '',
+        ' APPLICATION',
+        ' Ctrl+H                  Hide / show bottom hints',
+        ' ?                       Open / close this help',
+        ' Ctrl+R                  Refresh',
+        ' Ctrl+L                  Start / retry login',
+        ' Ctrl+Y / Ctrl+X         Confirm / cancel login',
+        ' Ctrl+C                  Quit',
+      ].join('\n'),
+      width: '100%',
+      fg: theme.foreground,
+      flexShrink: 0,
+    }),
+  );
+  helpView.add(helpScroll);
+  helpView.add(
+    new Text(renderer, {
+      content: ' j/k · ↑/↓ · PgUp/PgDn · ^B/^F · ^U/^D scroll · ?/Esc close',
+      height: 1,
+      fg: green,
+    }),
+  );
+  root.add(helpView);
   renderer.root.add(root);
   let view = { chats: [], messages: [] };
   let cursor = 0;
@@ -265,6 +354,7 @@ async function createApp(
   let transferNote = '';
   let pathPrompt;
   let disposed = false;
+  const helpKey = (key, name) => !key.ctrl && !key.meta && (name === '?' || (name === '/' && key.shift));
   const safeImage = (source) =>
     typeof source === 'string' &&
     source.length <= 2800000 &&
@@ -329,12 +419,20 @@ async function createApp(
     pane.borderColor = mode === 'chats' ? theme.border : green;
     highlightMessages();
     const help = {
-      chats: 'CHATS · j/k select · l/Enter conversation · i insert',
-      // eslint-disable-next-line max-len
-      history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k select · ^D/^U page · r reply · i insert · h chats`,
-      insert: 'INSERT · Enter send · Esc scroll · Tab chats',
+      chats: 'CHATS · j/k move · Enter open',
+      history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k move · i insert`,
+      insert: 'INSERT · Enter send · Esc scroll',
     };
-    hints.content = ` ${help[mode]} · ^S download · ^T upload · l media · s stickers · ^C quit`;
+    const shortHelp = {
+      chats: 'CHATS · j/k · Enter',
+      history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k`,
+      insert: 'INSERT · Enter · Esc',
+    };
+    const controls = '^E cache · ^K clear · ^P preview · ^H hints · ? help';
+    hints.content =
+      renderer.width < 100
+        ? ` ${shortHelp[mode]} · ${controls}`
+        : ` ${help[mode]} · ^S save · ^T upload · ${controls} · ^C quit`;
     if (mode === 'history') {
       if (previousMode === 'chats' && messageRows[messageCursor]) {
         if (messageCursor === messageRows.length - 1) history.scrollTo(history.scrollHeight);
@@ -524,6 +622,7 @@ async function createApp(
       !target ||
       imageCache.has(target) ||
       target === previewTarget ||
+      (view.mode === 'live' && view.autoImages && expandedMessageId !== target) ||
       mode !== 'history' ||
       view.status !== 'ready' ||
       view.busy ||
@@ -568,13 +667,41 @@ async function createApp(
     for (const { message, image } of messageRows) {
       const sticker = message.sticker;
       const stickerKey = sticker ? `${sticker.id}${sticker.hash ? `-${sticker.hash}` : ''}` : '';
-      const source = imageCache.get(message.id) || view.stickerImages?.[stickerKey];
+      const thumbnail =
+        view.mode === 'live' && view.autoImages && view.photoThumbnails?.[message.id]?.status === 'ready'
+          ? view.photoThumbnails[message.id].data
+          : '';
+      const source = imageCache.get(message.id) || thumbnail || view.stickerImages?.[stickerKey];
       image.visible = safeImage(source);
       image.height = 0;
       if (image.visible) image.height = Math.max(1, Math.min(sticker ? 6 : 10, history.viewport.height - 4));
       if (image.source !== (image.visible ? source : undefined)) image.source = image.visible ? source : undefined;
     }
   };
+  const requestVisiblePhotos = () => {
+    if (failed || disposed || view.mode !== 'live' || !view.autoImages || !view.selectedId) return;
+    if (history.viewport.height <= 0) return;
+    const visible =
+      view.status === 'ready' || view.status === 'offline'
+        ? messageRows
+            .filter(
+              ({ row, message }) =>
+                row.height > 0 &&
+                row.y < history.viewport.y + history.viewport.height &&
+                row.y + row.height > history.viewport.y &&
+                message.contentType === 1 &&
+                message.downloadable,
+            )
+            .slice(0, 8)
+            .map(({ message }) => message.id)
+        : [];
+    const ids = expandedMessageId || videoController || stickerPicker.active || transferController ? [] : visible;
+    const key = JSON.stringify([view.session, view.selectedId, view.selection, ids]);
+    if (key === visiblePhotosKey) return;
+    visiblePhotosKey = key;
+    backend.command({ action: 'photos-visible', ...context(), messageIds: ids });
+  };
+  root.renderAfter = requestVisiblePhotos;
   const onState = (next) => {
     if (failed) return;
     if (
@@ -587,6 +714,7 @@ async function createApp(
       closePaths([]);
     }
     const changed = next.selectedId !== view.selectedId || next.session !== view.session;
+    if (changed) pendingHistoryPage = 0;
     const cursorId = changed ? next.selectedId : view.chats[cursor]?.id;
     view = next;
     cursor = Math.max(
@@ -611,8 +739,14 @@ async function createApp(
       input.value = view.draft || '';
       syncing = false;
     }
-    // eslint-disable-next-line max-len
-    header.content = ` LINE${view.mode === 'demo' ? ' · DEMO' : ''}  ·  ${clean(view.account?.name)}  ${view.watching ? '● connected' : ''}`;
+    const mediaInfo =
+      view.account?.id && view.mode === 'live'
+        ? ` · cached ${view.mediaCacheEnabled ? 'on' : 'off'} ${Math.ceil((view.mediaCacheBytes || 0) / 1048576)} MiB` +
+          ` · preview: ${view.autoImages ? 'auto' : 'selected'}`
+        : '';
+    header.content =
+      ` LINE${view.mode === 'demo' ? ' · DEMO' : ''}  ·  ${clean(view.account?.name)} ` +
+      ` ${view.watching ? '● connected' : ''}${mediaInfo}`;
     pane.title = ` ${clean(view.chats.find((chat) => chat.id === view.selectedId)?.name || 'Messages')} `;
     paintChats();
     const key = JSON.stringify([view.selectedId, view.messages]);
@@ -629,6 +763,10 @@ async function createApp(
               0,
               view.messages.findIndex((message) => message.id === previousId),
             );
+      if (pendingHistoryPage < 0) messageCursor = Math.max(0, view.messages.length - 1);
+      if (pendingHistoryPage > 0) messageCursor = 0;
+      const paged = pendingHistoryPage !== 0;
+      pendingHistoryPage = 0;
       const messageTexts = view.messages.map((message) => {
         const sent = message.own && ['ok', 'sent', 'delivered'].includes(message.status);
         let tick = sent ? ' ✓' : '';
@@ -694,8 +832,12 @@ async function createApp(
       emptyMessages.visible = !messageRows.length;
       emptyMessages.content = 'No messages loaded.';
       if (changed) {
+        visiblePhotosKey = '';
         history.scrollTo(history.scrollHeight);
         history.stickyScroll = true;
+      } else if (paged && messageRows[messageCursor]) {
+        history.stickyScroll = false;
+        history.scrollChildIntoView(messageRows[messageCursor].row.id);
       }
     }
     highlightMessages();
@@ -719,13 +861,16 @@ async function createApp(
     const loginControls = login.stage === 'uncertain' ? 'Ctrl+R 檢查已儲存的登入狀態' : 'Ctrl+X cancel · Ctrl+L retry';
     // eslint-disable-next-line max-len
     loginText.content = `${clean(login.statusText)}${login.pin ? `\nPIN: ${clean(login.pin)}` : ''}${login.canConfirm ? '\nCtrl+Y to confirm' : ''}\n${loginControls}`;
-    status.height = view.reply ? 3 : 2;
+    status.height = view.reply ? 2 : 1;
     const replyText = clean(view.reply?.text || '[Attachment]').replace(/\n/g, ' ');
     const replyHint = view.reply
       ? `Reply to ${clean(view.reply.sender)}: ${replyText} · Esc in scroll mode cancels\n`
       : '';
-    // eslint-disable-next-line max-len
-    status.content = ` ${replyHint}${clean(view.statusText)}\n ${clean(view.sendNote || view.historyNote || '')}${view.sendStatus === 'pending' ? ' Sending…' : ''}`;
+    const statusText = clean(view.statusText).replace(/\s*\n\s*/g, ' · ');
+    const note = clean(view.sendNote || view.historyNote).replace(/\s*\n\s*/g, ' · ');
+    status.content = ` ${replyHint}${[statusText, note, view.sendStatus === 'pending' ? 'Sending…' : '']
+      .filter(Boolean)
+      .join(' · ')}`;
     if (transferNote) status.content = clean(transferNote);
   };
   backend.on('state', onState);
@@ -791,13 +936,59 @@ async function createApp(
         ? key.name.toLowerCase()
         : key.name;
     if (
-      (key.ctrl && ['c', 'r', 'l', 'y', 'x'].includes(name)) ||
+      (key.ctrl && ['c', 'r', 'l', 'y', 'x', 'e', 'k', 'p'].includes(name)) ||
       ['tab', 'escape', 'pageup', 'pagedown'].includes(name)
     ) {
       key.preventDefault?.();
     }
     if (key.ctrl && name === 'c') {
       renderer.destroy();
+      return;
+    }
+    if (helpView.visible) {
+      key.preventDefault?.();
+      if (name === 'escape' || helpKey(key, name)) {
+        helpView.visible = false;
+      } else {
+        const half = Math.max(1, Math.floor(helpScroll.viewport.height / 2));
+        const full = Math.max(1, helpScroll.viewport.height);
+        const distance = {
+          j: 1,
+          down: 1,
+          k: -1,
+          up: -1,
+          pageup: -full,
+          pagedown: full,
+        }[name];
+        const ctrlDistance = key.ctrl ? { b: -full, f: full, u: -half, d: half }[name] : undefined;
+        if (distance || ctrlDistance) helpScroll.scrollBy(distance || ctrlDistance);
+      }
+      return;
+    }
+    if (key.ctrl && name === 'h' && mode !== 'insert' && !transferController) {
+      key.preventDefault?.();
+      hints.visible = !hints.visible;
+      hints.height = hints.visible ? 1 : 0;
+      if (!saveHintsVisible(hints.visible, hintsFile)) {
+        status.content = ' Could not save hints preference';
+      }
+      return;
+    }
+    if (helpKey(key, name) && mode !== 'insert' && !transferController) {
+      key.preventDefault?.();
+      helpScroll.scrollTo(0);
+      helpView.visible = true;
+      return;
+    }
+    if (key.ctrl && name === 'p') {
+      if (!failed && view.mode === 'live' && view.account?.id) {
+        const enabled = !view.autoImages;
+        backend.command({ action: 'auto-images', enabled });
+        if (!enabled) {
+          backend.command({ action: 'photos-hide', ...context() });
+          visiblePhotosKey = '';
+        }
+      }
       return;
     }
     if (transferController) {
@@ -807,6 +998,12 @@ async function createApp(
         transferController.abort();
       } else if (!pathPrompt) {
         key.preventDefault?.();
+      }
+      return;
+    }
+    if (key.ctrl && ['e', 'k'].includes(name)) {
+      if (!failed && view.mode === 'live' && view.account?.id) {
+        backend.command({ action: name === 'e' ? 'media-cache-toggle' : 'media-cache-clear' });
       }
       return;
     }
@@ -975,6 +1172,16 @@ async function createApp(
       key.preventDefault?.();
       openAtBottom = false;
       const selected = messageRows[messageCursor];
+      if (delta < 0 && messageCursor === 0 && view.historyOlder) {
+        pendingHistoryPage = -1;
+        backend.command({ action: 'history-older' });
+        return;
+      }
+      if (delta > 0 && messageCursor === messageRows.length - 1 && view.historyNewer) {
+        pendingHistoryPage = 1;
+        backend.command({ action: 'history-newer' });
+        return;
+      }
       // Keep moving through a tall message before selecting its neighbour.
       if (selected) {
         const top = history.viewport.y;
