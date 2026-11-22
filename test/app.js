@@ -27,7 +27,7 @@ const inherit = (proto, props) =>
 
 /** The whole app in a test world (docs/TESTING.md). */
 const boot = async ({ telegram, width = 80, height = 24, env = {} }) => {
-  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'tuigram-test-'));
+  const home = await fsp.mkdtemp(path.join(os.tmpdir(), 'tuiline-test-'));
   const removeHome = () => fsp.rm(home, { recursive: true, force: true, maxRetries: 5 });
   const { world, terminal, spawned, fetched } = await createTestWorld({ telegram, width, height });
 
@@ -48,7 +48,7 @@ const boot = async ({ telegram, width = 80, height = 24, env = {} }) => {
       TUIGRAM_API_HASH: 'test',
       ...env,
     },
-    argv: [process.execPath, path.join(ROOT, 'bin', 'tuigram.js')],
+    argv: [process.execPath, path.join(ROOT, 'bin', 'telegram.js')],
     exit: (code = 0) => exit(code),
     on: () => testProcess,
     removeAllListeners: () => testProcess,
@@ -60,7 +60,7 @@ const boot = async ({ telegram, width = 80, height = 24, env = {} }) => {
   try {
     const started = loadTree(context, { rootDir: ROOT }).then(() => null);
     const code = await Promise.race([started, exited]);
-    if (code !== null) throw new Error(`tuigram exited with ${code} while starting:\n${logs.join('\n')}`);
+    if (code !== null) throw new Error(`tuiline exited with ${code} while starting:\n${logs.join('\n')}`);
   } catch (error) {
     await removeHome();
     throw error;

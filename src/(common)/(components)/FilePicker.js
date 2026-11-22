@@ -21,7 +21,7 @@ const DEFAULT_KEY_BINDINGS = {
   moveUp: [{ name: 'up' }, { name: 'k' }],
   moveDown: [{ name: 'down' }, { name: 'j' }],
   // `gg`/`shift+g` are the conventional first/last chords, but this handler only ever sees one
-  // keypress at a time — tuigram drives `first()`/`last()` itself through a sequence-aware keymap
+  // keypress at a time — tuiline drives `first()`/`last()` itself through a sequence-aware keymap
   // layer instead of a single-key default here.
   first: [{ name: 'home' }],
   last: [{ name: 'end' }],

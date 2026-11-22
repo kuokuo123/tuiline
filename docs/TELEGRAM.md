@@ -1,5 +1,9 @@
 # 📟 tuigram — Telegram Terminal UI Client
 
+> Archived upstream documentation for tuigram. In this fork, run the legacy Telegram
+> client with `npm run dev:telegram` or `node bin/telegram.js`. The `tuiline` command
+> starts the LINE client; see [the current README](../README.md) and [INSTALL.md](../INSTALL.md).
+
 A lightweight Telegram client for the terminal, built on
 [OpenTUI](https://github.com/anomalyco/opentui) and [mtcute](https://github.com/mtcute/mtcute),
 with Vim-flavored navigation.

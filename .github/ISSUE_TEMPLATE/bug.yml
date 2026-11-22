@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in tuigram doesn't work as it should
+description: Something in tuiline doesn't work as it should
 labels: [bug]
 body:
   - type: textarea
@@ -13,7 +13,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: The output of `tuigram --version`
+      description: The output of `tuiline --version`
       placeholder: 1.5.1
     validations:
       required: true
@@ -42,6 +42,6 @@ body:
     attributes:
       label: Log
       description: >-
-        The relevant part of `~/.local/state/tuigram/tuigram.log` (or `$TUIGRAM_LOG`). Read it for
+        The relevant part of `./tuiline-login.log` (for LINE login diagnostics). Read it for
         anything private before you paste it.
       render: text

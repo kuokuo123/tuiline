@@ -28,14 +28,15 @@ jobs:
       - name: Write the shipped app key
         run: node scripts/write-app-key.js
         env:
-          TUIGRAM_SHIPPED_API_ID: ${{ secrets.TUIGRAM_SHIPPED_API_ID }}
-          TUIGRAM_SHIPPED_API_HASH: ${{ secrets.TUIGRAM_SHIPPED_API_HASH }}
+          TUILINE_SHIPPED_API_ID: ${{ secrets.TUILINE_SHIPPED_API_ID || secrets.TUIGRAM_SHIPPED_API_ID }}
+          TUILINE_SHIPPED_API_HASH: ${{ secrets.TUILINE_SHIPPED_API_HASH || secrets.TUIGRAM_SHIPPED_API_HASH }}
       - run: npm publish
 
   bump-formula:
     needs: publish
     runs-on: ubuntu-latest
-    if: ${{ !contains(github.ref_name, '-') }} # prereleases stay off Homebrew
+    # This is the original upstream tap, not a distribution channel for the tuiline fork.
+    if: ${{ github.repository == 'leonid-shutov/tuigram' && !contains(github.ref_name, '-') }}
     steps:
       - uses: actions/checkout@v7
         with:

@@ -6,6 +6,7 @@ const { playVideo } = require('./video');
 const { createStickerPicker } = require('./stickers');
 const { createMentionPicker } = require('./mentions');
 const { createLoginLog } = require('./login-log');
+const { terminalTheme } = require('./theme');
 const { pickFiles, parsePaths, uploadFiles, downloadFile } = require('./files');
 
 // Remote strings are plain text; strip terminal control bytes before display.
@@ -31,12 +32,14 @@ async function createApp(
     ImageRenderable: Image,
     InputRenderableEvents,
   } = await import('@opentui/core');
-  const green = '#06c755';
+  const theme = await terminalTheme();
+  const green = theme.accent;
+  renderer.setBackgroundColor(theme.background);
   const root = new Box(renderer, {
     width: '100%',
     height: '100%',
     flexDirection: 'column',
-    backgroundColor: '#101714',
+    backgroundColor: theme.background,
   });
   const header = new Text(renderer, { content: ' LINE  ·  Connecting…', fg: green, height: 1 });
   const body = new Box(renderer, { flexDirection: 'row', flexGrow: 1, minHeight: 0 });
@@ -45,11 +48,13 @@ async function createApp(
     minWidth: 20,
     border: true,
     borderColor: green,
+    titleColor: theme.foreground,
+    scrollbarOptions: theme.scrollbar,
     title: ' Chats ',
   });
   let chatRows = [];
   let chatRowsKey = '';
-  const emptyChats = new Text(renderer, { content: ' No chats yet', fg: '#d8e5dd' });
+  const emptyChats = new Text(renderer, { content: ' No chats yet', fg: theme.foreground });
   chats.add(emptyChats);
   const pane = new Box(renderer, {
     flexGrow: 1,
@@ -57,7 +62,8 @@ async function createApp(
     minWidth: 0,
     flexDirection: 'column',
     border: true,
-    borderColor: '#385044',
+    borderColor: theme.muted,
+    titleColor: theme.foreground,
     title: ' Messages ',
   });
   const history = new ScrollBox(renderer, {
@@ -67,10 +73,11 @@ async function createApp(
     minHeight: 0,
     stickyScroll: true,
     stickyStart: 'bottom',
+    scrollbarOptions: theme.scrollbar,
   });
   const emptyMessages = new Text(renderer, {
     content: 'Select a chat, or press Ctrl+L to sign in.',
-    fg: '#d8e5dd',
+    fg: theme.foreground,
     width: '100%',
   });
   history.add(emptyMessages);
@@ -98,11 +105,16 @@ async function createApp(
     width: '100%',
     maxLength: 10000,
     placeholder: 'i to insert · Esc to scroll',
-    textColor: '#ffffff',
-    focusedBackgroundColor: '#20382a',
+    textColor: theme.foreground,
+    focusedTextColor: theme.foreground,
+    backgroundColor: theme.background,
+    focusedBackgroundColor: theme.background,
+    placeholderColor: theme.muted,
+    selectionBg: theme.selectionBackground,
+    selectionFg: theme.selectionForeground,
     cursorColor: green,
   });
-  const status = new Text(renderer, { content: '', fg: '#a6bdaf', height: 2 });
+  const status = new Text(renderer, { content: '', fg: theme.foreground, height: 2 });
   const linkPicker = new Text(renderer, { content: '', fg: green, visible: false, maxHeight: 10 });
   const hints = new Text(renderer, {
     content:
@@ -122,8 +134,14 @@ async function createApp(
     maxLength: 16000,
     visible: false,
     placeholder: 'File paths (quote paths with spaces) · Enter uploads · Esc cancels',
-    textColor: '#ffffff',
-    focusedBackgroundColor: '#20382a',
+    textColor: theme.foreground,
+    focusedTextColor: theme.foreground,
+    backgroundColor: theme.background,
+    focusedBackgroundColor: theme.background,
+    placeholderColor: theme.muted,
+    selectionBg: theme.selectionBackground,
+    selectionFg: theme.selectionForeground,
+    cursorColor: green,
   });
   pane.add(fileInput);
   const expandedView = new Box(renderer, {
@@ -135,7 +153,7 @@ async function createApp(
     height: '100%',
     flexDirection: 'column',
     visible: false,
-    backgroundColor: '#101714',
+    backgroundColor: theme.background,
     zIndex: 10,
   });
   const expandedScroll = new ScrollBox(renderer, {
@@ -143,6 +161,7 @@ async function createApp(
     flexGrow: 1,
     minHeight: 0,
     scrollX: false,
+    scrollbarOptions: theme.scrollbar,
   });
   const expandedImage = new Image(renderer, {
     id: 'line-expanded-image',
@@ -183,7 +202,7 @@ async function createApp(
     width: '100%',
     height: '100%',
     flexDirection: 'column',
-    backgroundColor: '#101714',
+    backgroundColor: theme.background,
     visible: false,
     zIndex: 11,
   });
@@ -257,21 +276,7 @@ async function createApp(
     pendingDraft = false;
   };
   const replyColors = new Map();
-  // Golden-angle hues spread neighbouring choices across the color wheel.
-  const replyPalette = Array.from({ length: 48 }, (_, index) => {
-    const hue = (index * 137.508) % 360;
-    const hex = (saturation, value) => {
-      const channel = (offset) => {
-        const sector = (offset + hue / 60) % 6;
-        const component = value * (1 - saturation * Math.max(0, Math.min(sector, 4 - sector, 1)));
-        return Math.round(component * 255)
-          .toString(16)
-          .padStart(2, '0');
-      };
-      return `#${channel(5)}${channel(3)}${channel(1)}`;
-    };
-    return [hex(0.55, 0.29), hex(0.4, 0.96)];
-  });
+  const { replyPalette } = theme;
   const highlightMessages = () => {
     const pair = new Set();
     for (const { message } of messageRows) {
@@ -288,25 +293,20 @@ async function createApp(
         id = byId.get(id).replyTo;
       }
       if (!replyColors.has(id)) {
-        const reply = messageRows.find(({ message }) => message.replyTo === id)?.message;
-        let hash = (reply?.text || byId.get(id)?.text || '').length;
-        for (const character of id) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
-        let slot = hash % replyPalette.length;
-        const used = new Set(replyColors.values());
-        for (let attempt = 0; attempt < replyPalette.length && used.has(replyPalette[slot]); attempt++) {
-          slot = (slot + 1) % replyPalette.length;
-        }
-        replyColors.set(id, replyPalette[slot]);
+        replyColors.set(id, replyPalette[replyColors.size % replyPalette.length]);
       }
       return replyColors.get(id);
     };
-    for (const [index, { marker, row, message }] of messageRows.entries()) {
+    for (const [index, { marker, row, message, text }] of messageRows.entries()) {
       const active = mode === 'history' && index === messageCursor;
       const linked = pair.has(message.id);
-      const selectionColor = active ? '#182a20' : 'transparent';
+      const selectionColor = active ? theme.messageSelectionBackground : 'transparent';
       const color = linked ? colorFor(message.id) : null;
+      const foreground = active ? theme.selectionForeground : theme.foreground;
+      const markerColor = active ? theme.selectionForeground : green;
       row.backgroundColor = color ? color[0] : selectionColor;
-      marker.fg = color ? color[1] : green;
+      text.fg = color ? color[1] : foreground;
+      marker.fg = color ? color[1] : markerColor;
       const relationMarker = linked ? '↪' : ' ';
       marker.content = active ? '›' : relationMarker;
     }
@@ -322,8 +322,8 @@ async function createApp(
     prefixAt = 0;
     if (mode === 'insert' && !transferController) input.focus();
     else input.blur();
-    chats.borderColor = mode === 'chats' ? green : '#385044';
-    pane.borderColor = mode === 'chats' ? '#385044' : green;
+    chats.borderColor = mode === 'chats' ? green : theme.muted;
+    pane.borderColor = mode === 'chats' ? theme.muted : green;
     highlightMessages();
     const help = {
       chats: 'CHATS · j/k select · l/Enter conversation · i insert',
@@ -473,23 +473,24 @@ async function createApp(
         const name = `${clean(chat.name)}${chat.unread ? ` (${chat.unread})` : ''}`;
         const preview = clean(chat.preview).replace(/\n/g, ' ').slice(0, 70);
         row.add(marker);
-        row.add(
-          new Text(renderer, {
-            content: `${name}\n${preview}`,
-            fg: '#d8e5dd',
-            flexGrow: 1,
-            flexShrink: 1,
-            minWidth: 0,
-          }),
-        );
+        const label = new Text(renderer, {
+          content: `${name}\n${preview}`,
+          fg: theme.foreground,
+          flexGrow: 1,
+          flexShrink: 1,
+          minWidth: 0,
+        });
+        row.add(label);
         chats.add(row);
-        return { row, marker };
+        return { row, marker, label };
       });
       emptyChats.visible = !chatRows.length;
     }
-    for (const [index, { row, marker }] of chatRows.entries()) {
+    for (const [index, { row, marker, label }] of chatRows.entries()) {
       marker.content = index === cursor ? '›' : ' ';
-      row.backgroundColor = index === cursor ? '#20382a' : 'transparent';
+      row.backgroundColor = index === cursor ? theme.selectionBackground : 'transparent';
+      label.fg = index === cursor ? theme.selectionForeground : theme.foreground;
+      marker.fg = index === cursor ? theme.selectionForeground : green;
     }
   };
   const paintLinks = () => {
@@ -636,7 +637,8 @@ async function createApp(
       messageRows = view.messages.map((message, index) => {
         const row = new Box(renderer, {
           id: `line-message-${index}`,
-          backgroundColor: mode === 'history' && index === messageCursor ? '#182a20' : 'transparent',
+          backgroundColor:
+            mode === 'history' && index === messageCursor ? theme.messageSelectionBackground : 'transparent',
           width: '100%',
           flexDirection: 'row',
           justifyContent: message.own ? 'flex-end' : 'flex-start',
@@ -660,14 +662,13 @@ async function createApp(
           flexShrink: 1,
           minWidth: 0,
         });
-        content.add(
-          new Text(renderer, {
-            content: bodyText,
-            fg: '#d8e5dd',
-            width: '100%',
-            flexShrink: 0,
-          }),
-        );
+        const text = new Text(renderer, {
+          content: bodyText,
+          fg: theme.foreground,
+          width: '100%',
+          flexShrink: 0,
+        });
+        content.add(text);
         const image = new Image(renderer, {
           id: `line-image-${index}`,
           width: '100%',
@@ -683,7 +684,7 @@ async function createApp(
         content.add(image);
         row.add(content);
         history.add(row);
-        return { row, marker, message, image };
+        return { row, marker, message, image, text };
       });
       emptyMessages.visible = !messageRows.length;
       emptyMessages.content = 'No messages loaded.';

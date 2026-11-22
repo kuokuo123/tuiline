@@ -32,6 +32,19 @@ npm run dev -- --demo
 
 ## Keys
 
+The interface uses your terminal's default foreground/background and ANSI 16-color
+palette, including its green accent. Selections and reply highlights use palette
+colors too, so your terminal theme controls the UI rather than fixed RGB colors.
+Selected messages outside reply threads use ANSI blue (slot 4) with black text
+(slot 0). Reply threads alternate gray backgrounds (slots 7 and 8), with bright-white
+text (slot 15); the `›` marker indicates the selected message within a thread.
+
+The package and command are named `tuiline` (`node bin/tuiline.js` or `npm run dev`
+from this checkout). Upstream attribution and legacy saved-data compatibility keep
+their original names.
+The npm installer requires a published `tuiline` release; renaming this checkout
+does not publish one. The source-build instructions above work without npm publication.
+
 | Key                      | Action                                                          |
 | ------------------------ | --------------------------------------------------------------- |
 | Up/Down, j/k             | Select a sidebar chat or move the message cursor in scroll mode |

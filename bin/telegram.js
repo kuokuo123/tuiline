@@ -10,19 +10,19 @@ const { createContext, RESTART } = require('./context');
 const { createWorld } = require('./world');
 const pkg = require('../package.json');
 
-const RELAUNCH = 'TUIGRAM_RELAUNCHED';
+const RELAUNCH = 'TUILINE_RELAUNCHED';
 // FFI is experimental, and Node says so on stderr before the renderer has the screen.
 const NODE_FLAGS = ['--experimental-ffi', '--disable-warning=ExperimentalWarning', '--optimize-for-size'];
-const RESTARTED = 'TUIGRAM_RESTARTED';
+const RESTARTED = 'TUILINE_RESTARTED';
 
 const args = process.argv.slice(2);
 
 if (args.includes('--help') || args.includes('-h')) {
   process.stdout.write(
     [
-      'tuigram — a terminal client for Telegram',
+      'tuiline — legacy Telegram client',
       '',
-      'Usage: tuigram [command]',
+      'Usage: node bin/telegram.js [command]',
       '',
       'Commands:',
       '  logout           sign out and delete the stored session',
@@ -32,8 +32,9 @@ if (args.includes('--help') || args.includes('-h')) {
       '  -h, --help       show this message',
       '  -v, --version    show the version',
       '',
-      'tuigram ships a Telegram app key. To use your own (https://my.telegram.org),',
-      'set TUIGRAM_API_ID / TUIGRAM_API_HASH or $XDG_CONFIG_HOME/tuigram/credentials.json.',
+      'To use your own Telegram app key (https://my.telegram.org),',
+      'set TUILINE_API_ID / TUILINE_API_HASH or $XDG_CONFIG_HOME/tuigram/credentials.json.',
+      'The legacy tuigram storage directory and TUIGRAM_* environment variables remain supported.',
       '',
     ].join('\n'),
   );
@@ -60,17 +61,17 @@ if (args[0] === 'upgrade') {
   const kind = channel.detect(rootDir);
 
   if (kind === 'git') {
-    process.stderr.write('tuigram: this is a git checkout, not an installed copy — nothing to upgrade\n');
+    process.stderr.write('tuiline: this is a git checkout, not an installed copy — nothing to upgrade\n');
     process.exit(1);
   } else if (kind === 'unknown') {
-    process.stderr.write('tuigram: could not tell how this copy was installed\n');
+    process.stderr.write('tuiline: could not tell how this copy was installed\n');
     process.exit(1);
   } else {
     const installPlan = channel.upgradePlan(rootDir, 'latest');
     // Empty steps (aur): nothing here can run itself, and an empty loop would silently exit 0
     // having done nothing.
     if (installPlan.steps.length === 0) {
-      process.stderr.write(`tuigram: ${installPlan.manualCommand}\n`);
+      process.stderr.write(`tuiline: ${installPlan.manualCommand}\n`);
       process.exit(1);
     }
     let status = 0;
@@ -83,7 +84,7 @@ if (args[0] === 'upgrade') {
 }
 
 // opentui talks to its Zig backend through node:ffi, which Node only exposes behind
-// --experimental-ffi. An installed `tuigram` cannot ask the user to type that, so re-exec
+// --experimental-ffi. An installed `tuiline` cannot ask the user to type that, so re-exec
 // ourselves with it; RELAUNCH guards against a loop if the flag is ignored. (opentui's own
 // error also names --allow-ffi, but that is a permission-model flag: passing it without
 // --permission is fatal on Node >= 24, and node:ffi does not need it otherwise.)
@@ -96,7 +97,7 @@ if (process.env[RELAUNCH] !== '1') {
   for (;;) {
     const { status, error } = spawnSync(process.execPath, argv, { stdio: 'inherit', env });
     if (error) {
-      process.stderr.write(`tuigram: ${error.message}\n`);
+      process.stderr.write(`tuiline: ${error.message}\n`);
       process.exit(1);
     }
     if (status !== RESTART) process.exit(status ?? 0);
@@ -110,7 +111,8 @@ if (process.env[RELAUNCH] !== '1') {
 // The renderer owns the terminal, so `console` has to go to a file. XDG resolution is
 // duplicated here (see src/01-config/mechanics/computePaths.js) because this runs before the app.
 const stateHome = process.env.XDG_STATE_HOME || path.join(os.homedir(), '.local', 'state');
-const LOG_FILE = process.env.TUIGRAM_LOG || path.join(stateHome, 'tuigram', 'tuigram.log');
+// Keep legacy Telegram logs and sessions in their original directories.
+const LOG_FILE = process.env.TUILINE_LOG || process.env.TUIGRAM_LOG || path.join(stateHome, 'tuigram', 'tuigram.log');
 
 mkdirSync(path.dirname(LOG_FILE), { recursive: true, mode: 0o700 });
 // Truncate on startup, but keep one session's log across restarts.
@@ -138,7 +140,7 @@ const crashReport = (label, detail) => {
   process.stderr.write(
     [
       '',
-      `tuigram: ${label}`,
+      `tuiline: ${label}`,
       '',
       detail
         .split('\n')

@@ -293,7 +293,7 @@ declare global {
     function soft(error: unknown): void;
     /**
      * The graceful counterpart to `hard`: dispose the auth UI, restore the terminal, close the
-     * Telegram client, then write `tuigram: <message>` to stderr (unless it's null) and exit with
+     * Telegram client, then write `tuiline: <message>` to stderr (unless it's null) and exit with
      * `code`. Returns before the process goes down — the exit waits on the client closing — so a
      * caller that has more statements after it must `return`.
      */
@@ -352,14 +352,14 @@ declare global {
   const spawnDetached: (tag: string, cmd: string, args: string[]) => void;
 
   /**
-   * Injected by `bin/tuigram.js`: prints the boxed crash report (stderr box + log line) that a
+   * Injected by `bin/telegram.js`: prints the boxed crash report (stderr box + log line) that a
    * boot-time crash already uses, so `Crash.hard` matches it exactly. Also logs to the log file.
    */
   const crashReport: (label: string, detail: string) => void;
 
   /**
-   * Injected by `bin/tuigram.js` (`bin/channel.js`), same pattern as `crashReport` above: how an
-   * install is shaped, and how to upgrade it, is decided once, since `bin/tuigram.js`'s own
+   * Injected by `bin/telegram.js` (`bin/channel.js`), same pattern as `crashReport` above: how an
+   * install is shaped, and how to upgrade it, is decided once, since `bin/telegram.js`'s own
    * `upgrade` subcommand needs the exact same detection and plan before the sandbox exists to
    * run them through src/(common)/Update/ instead.
    */
@@ -375,16 +375,16 @@ declare global {
     const writable: (plan: UpgradePlan | null) => boolean;
   }
 
-  /** Injected by `bin/tuigram.js`: this install's own `package.json` version, read once before
+  /** Injected by `bin/telegram.js`: this install's own `package.json` version, read once before
    * the sandbox exists (the same read `--version` already uses) rather than re-reading it from
    * `__rootDir` in here. */
   const packageVersion: string;
 
-  /** Injected by `bin/tuigram.js`: the exit code that makes it start the app again. */
+  /** Injected by `bin/telegram.js`: the exit code that makes it start the app again. */
   const __restartExitCode: number;
 
   /**
-   * Injected by `bin/tuigram.js` (`bin/world.js`) or the tests (`test/world.js`); see
+   * Injected by `bin/telegram.js` (`bin/world.js`) or the tests (`test/world.js`); see
    * docs/decisions/0002.
    */
   const world: {
@@ -648,13 +648,13 @@ declare global {
     const keys: (bindings: readonly KeymapActiveBinding[]) => string;
   }
 
-  /** tuigram's own chrome in the configured language. Message text from Telegram itself is
+  /** tuiline's own chrome in the configured language. Message text from Telegram itself is
    * never translated. */
   namespace Locale {
     /** Bahasa Melayu string table, keyed by the English label. The one list of labels:
      * `Label` is read from its keys. */
     const ms: typeof import('../src/(common)/Locale/ms.json');
-    /** Every English label tuigram can show. Passing anything else to `t` is a type error,
+    /** Every English label tuiline can show. Passing anything else to `t` is a type error,
      * so a label can't exist without its Malay entry. */
     type Label = keyof typeof ms;
     /** One argument per `%s` in `S`. */
@@ -797,7 +797,7 @@ declare global {
   const self: AppSelf;
 
   /** Injected by uncommonjs's `loadTree`: the resolved package root, i.e. `path.resolve(__dirname,
-   * '..')` from `bin/tuigram.js`. Used by src/(common)/Update to read package.json and detect
+   * '..')` from `bin/telegram.js`. Used by src/(common)/Update to read package.json and detect
    * the install channel, since src/ otherwise has no `__dirname`. */
   const __rootDir: string;
 

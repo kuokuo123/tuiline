@@ -1,4 +1,4 @@
-// Everything tuigram writes lives under XDG directories, never the cwd.
+// Legacy Telegram storage retains its original name to preserve saved sessions and settings.
 const home = node.os.homedir();
 /**
  * @param {string} variable
@@ -31,5 +31,5 @@ node.fs.mkdirSync(cacheDir, { recursive: true, mode: 0o755 });
   session: node.path.join(dataDir, 'session.db'),
   // The glyphs set by hand, by chat id: they belong to the account, like the session.
   emojis: node.path.join(dataDir, 'emojis.json'),
-  log: process.env.TUIGRAM_LOG || node.path.join(stateDir, 'tuigram.log'),
+  log: process.env.TUILINE_LOG || process.env.TUIGRAM_LOG || node.path.join(stateDir, 'tuigram.log'),
 });

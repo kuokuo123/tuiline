@@ -93,7 +93,7 @@ declare global {
     /** A cached message's reactions changed: store the new set, keeping which are ours where it
      * doesn't say. */
     reactionsChanged(event: ReactionsEvent): void;
-    /** Shut down and have bin/tuigram.js start the app again from scratch: on wake from sleep
+    /** Shut down and have bin/telegram.js start the app again from scratch: on wake from sleep
      * and on ctrl+r. */
     restart(): void;
     /** Push the open chat's messages to the pane as bubbles, with the run of ours its partner hasn't

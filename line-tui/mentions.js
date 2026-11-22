@@ -1,5 +1,7 @@
 'use strict';
 
+const { terminalTheme } = require('./theme');
+
 // LINE mention ranges count UTF-16 units, matching JavaScript string offsets.
 function editMentions(previous, next, mentions) {
   let start = 0;
@@ -20,14 +22,15 @@ function editMentions(previous, next, mentions) {
 
 async function createMentionPicker(renderer, backend, { parent, input, getView, getContext, isInsert }) {
   const { TextRenderable: Text } = await import('@opentui/core');
+  const theme = await terminalTheme();
   const { default: stringWidth } = await import('string-width');
   const popup = new Text(renderer, {
     id: 'line-mention-picker',
     visible: false,
     height: 1,
     flexShrink: 0,
-    fg: '#d8e5dd',
-    bg: '#20364d',
+    fg: theme.selectionForeground,
+    bg: theme.selectionBackground,
   });
   // The picker occupies rows immediately above the composer.
   parent.insertBefore(popup, input);

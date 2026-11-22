@@ -4,7 +4,7 @@ async () => {
   if (message === null) return;
   if (message.text === '') return void ui.chat.flashStatus(Locale.t('no text'));
 
-  const dir = node.fs.mkdtempSync(node.path.join(node.os.tmpdir(), 'tuigram-'));
+  const dir = node.fs.mkdtempSync(node.path.join(node.os.tmpdir(), 'tuiline-'));
   const file = node.path.join(dir, `message-${message.id}.txt`);
   node.fs.writeFileSync(file, message.text.endsWith('\n') ? message.text : `${message.text}\n`, { mode: 0o444 });
 

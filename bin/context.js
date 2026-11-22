@@ -6,7 +6,7 @@ const pkg = require('../package.json');
 // The app exits with this to be started again from scratch (src/08-actions/restart.js).
 const RESTART = 75;
 
-// The sandbox's context, shared by bin/tuigram.js and test/app.js (docs/decisions/0002).
+// The sandbox's context, shared by bin/telegram.js and test/app.js (docs/decisions/0002).
 const createContext = async ({ world, console, process, crashReport }) => {
   const tui = await import('@opentui/core');
   // uncommonjs's `npm` global only carries top-level package names, so the keymap's subpath

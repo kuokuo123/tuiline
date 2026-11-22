@@ -37,7 +37,7 @@ const UPDATE_GAP = '  ';
   }
 
   self.text.content = new tui.StyledText([
-    tui.fg(config.theme.warning)(Locale.t('tuigram %s is available', release.version)),
+    tui.fg(config.theme.warning)(Locale.t('tuiline %s is available', release.version)),
     tui.fg(config.theme.muted)(UPDATE_GAP),
     tui.fg(config.theme.accent)('shift+u'),
     tui.fg(config.theme.muted)(Locale.t(' upgrade')),

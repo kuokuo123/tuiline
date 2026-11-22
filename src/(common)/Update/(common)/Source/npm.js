@@ -1,4 +1,4 @@
-const REGISTRY = 'https://registry.npmjs.org/tuigram';
+const REGISTRY = 'https://registry.npmjs.org/tuiline';
 // The abbreviated packument: a few KB instead of every version ever published, and it still
 // carries dist-tags and each version's `engines`.
 const ACCEPT = 'application/vnd.npm.install-v1+json';
@@ -8,7 +8,7 @@ async () => {
   const body = await Fetch.text(REGISTRY, {
     accept: ACCEPT,
     'accept-encoding': 'identity',
-    'user-agent': `tuigram/${packageVersion}`,
+    'user-agent': `tuiline/${packageVersion}`,
   });
   if (body === null) return null;
 

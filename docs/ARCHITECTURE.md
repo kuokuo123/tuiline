@@ -1,12 +1,12 @@
 # Architecture
 
-tuigram has no `require` or `import` under `src/`. The app is a directory tree that
+tuiline's legacy Telegram client has no `require` or `import` under `src/`. That client is a directory tree that
 [uncommonjs](https://github.com/leonid-shutov/uncommon-js) loads into one object graph: the shape
 of the tree is the wiring. This page is what you need to know before touching `src/`.
 
 ## How the app boots
 
-1. `bin/tuigram.js` handles `--help`, `--version` and `upgrade`, then re-runs itself with
+1. `bin/telegram.js` handles `--help`, `--version` and `upgrade`, then re-runs itself with
    `--experimental-ffi` (opentui reaches its native renderer through `node:ffi`) and points
    `console` at the log file — the renderer owns the terminal.
 2. `bin/world.js` builds the **world**: everything the app touches outside the process — the
@@ -114,5 +114,5 @@ disappears. Catch where the app hands control to them, and use:
   `08-actions`; put it in `src/(common)/` if both need it.
 - **`instanceof` fails for objects made outside the sandbox** (anything from Node or the world).
   Check their shape instead.
-- **opentui has quirks** that are easy to mistake for bugs in tuigram; the known ones are in
+- **opentui has quirks** that are easy to mistake for bugs in tuiline; the known ones are in
   [OPENTUI_BUGS.md](OPENTUI_BUGS.md), and mtcute's in [MTCUTE_BUGS.md](MTCUTE_BUGS.md).

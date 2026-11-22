@@ -10,8 +10,9 @@ const filled = (value) => typeof value === 'string' && value.trim() !== '';
 
 /** @type {() => Found} */
 const fromEnv = () => {
-  const apiId = process.env.TUIGRAM_API_ID;
-  const apiHash = process.env.TUIGRAM_API_HASH;
+  const renamed = process.env.TUILINE_API_ID !== undefined || process.env.TUILINE_API_HASH !== undefined;
+  const apiId = renamed ? process.env.TUILINE_API_ID : process.env.TUIGRAM_API_ID;
+  const apiHash = renamed ? process.env.TUILINE_API_HASH : process.env.TUIGRAM_API_HASH;
   if (!filled(apiId) || !filled(apiHash)) return null;
   return { apiId: apiId.trim(), apiHash: apiHash.trim(), source: 'env' };
 };

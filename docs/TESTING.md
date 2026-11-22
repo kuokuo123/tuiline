@@ -1,6 +1,6 @@
 # Testing
 
-Every test boots the whole app, as `bin/tuigram.js` would, in a test world: a headless terminal,
+The legacy Telegram integration tests boot the whole client, as `bin/telegram.js` would, in a test world: a headless terminal,
 a fake Telegram account, and a fresh home directory. It then drives the app with key presses and
 Telegram events, and checks what a user, or the system, would see. Why it is built this way, and
 what was ruled out, is in
@@ -62,7 +62,7 @@ it('notifies about a message arriving in another chat', async () => {
 
   // 4. What they see, and what happened outside the app.
   await app.waitForText('still on?');
-  assert.deepStrictEqual(app.spawned, [{ cmd: 'notify-send', args: ['--app-name=tuigram', 'Bob', 'still on?'] }]);
+  assert.deepStrictEqual(app.spawned, [{ cmd: 'notify-send', args: ['--app-name=tuiline', 'Bob', 'still on?'] }]);
 });
 ```
 

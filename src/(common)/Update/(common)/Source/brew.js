@@ -8,7 +8,7 @@ async () => {
   const body = await Fetch.text(FORMULA, {
     accept: 'text/plain',
     'accept-encoding': 'identity',
-    'user-agent': `tuigram/${packageVersion}`,
+    'user-agent': `tuiline/${packageVersion}`,
   });
   if (body === null) return null;
 

@@ -1,5 +1,5 @@
 {
-  "name": "tuigram",
+  "name": "tuiline",
   "version": "1.5.1",
   "description": "Terminal UI client for LINE Messenger",
   "keywords": [
@@ -12,16 +12,16 @@
   ],
   "author": "Leonid Shutov <leonid.shutov@hey.com>",
   "license": "MIT",
-  "homepage": "https://github.com/leonid-shutov/tuigram#readme",
+  "homepage": "https://github.com/kuokuo123/tuiline#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/leonid-shutov/tuigram.git"
+    "url": "git+https://github.com/kuokuo123/tuiline.git"
   },
   "bugs": {
-    "url": "https://github.com/leonid-shutov/tuigram/issues"
+    "url": "https://github.com/kuokuo123/tuiline/issues"
   },
   "bin": {
-    "tuigram": "bin/tuigram.js"
+    "tuiline": "bin/tuiline.js"
   },
   "files": [
     "app-key.json",
@@ -40,7 +40,7 @@
     "node": ">=26.4.0"
   },
   "scripts": {
-    "dev": "node bin/tuigram.js",
+    "dev": "node bin/tuiline.js",
     "fmt": "prettier --write .",
     "fmt:check": "prettier --check .",
     "lint": "eslint .",

@@ -9,7 +9,7 @@ const source = path.resolve(__dirname, '..');
 const output = path.resolve(__dirname, '../backend-bin/line-gui');
 mkdirSync(path.dirname(output), { recursive: true });
 // Apply TUI patches to the bundled backend through Go's overlay support.
-const temporary = mkdtempSync(path.join(os.tmpdir(), 'tuigram-line-build-'));
+const temporary = mkdtempSync(path.join(os.tmpdir(), 'tuiline-line-build-'));
 try {
   const replace = {};
   for (const name of [
@@ -32,49 +32,49 @@ try {
     writeFileSync(patched, content);
     replace[original] = patched;
   }
-  replace[path.resolve(source, 'backend/internal/gui/tuigram_read_receipts.go')] = path.resolve(
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_read_receipts.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/read_receipts.go',
   );
   const testing = process.argv.includes('--test');
-  replace[path.resolve(source, 'backend/internal/gui/tuigram_sticker_cache.go')] = path.resolve(
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_sticker_cache.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/sticker_cache.go',
   );
-  replace[path.resolve(source, 'backend/internal/gui/tuigram_chinese_locale.go')] = path.resolve(
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_chinese_locale.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/chinese_locale.go',
   );
-  replace[path.resolve(source, 'backend/pkg/line/tuigram_download_progress.go')] = path.resolve(
+  replace[path.resolve(source, 'backend/pkg/line/tuiline_download_progress.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/download_progress.go',
   );
-  replace[path.resolve(source, 'backend/internal/gui/tuigram_download_progress.go')] = path.resolve(
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_download_progress.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/gui_download_progress.go',
   );
   if (testing) {
-    replace[path.resolve(source, 'backend/internal/gui/tuigram_sticker_cache_test.go')] = path.resolve(
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_sticker_cache_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/sticker_cache_test.go',
     );
-    replace[path.resolve(source, 'backend/internal/gui/tuigram_chinese_locale_test.go')] = path.resolve(
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_chinese_locale_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/chinese_locale_test.go',
     );
-    replace[path.resolve(source, 'backend/internal/gui/tuigram_download_progress_test.go')] = path.resolve(
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_download_progress_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/download_progress_test.go',
     );
-    replace[path.resolve(source, 'backend/internal/events/tuigram_read_events_test.go')] = path.resolve(
+    replace[path.resolve(source, 'backend/internal/events/tuiline_read_events_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/read_events_test.go',
     );
-    replace[path.resolve(source, 'backend/internal/gui/tuigram_read_receipts_test.go')] = path.resolve(
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_read_receipts_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/read_receipts_test.go',
     );
-    replace[path.resolve(source, 'backend/internal/gui/tuigram_chat_limit_test.go')] = path.resolve(
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_chat_limit_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/chat_limit_test.go',
     );
@@ -98,7 +98,11 @@ try {
   const result = spawnSync('go', args, {
     cwd: path.join(source, 'backend'),
     stdio: 'inherit',
-    env: { ...process.env, CGO_ENABLED: '0', GOCACHE: process.env.GOCACHE || '/tmp/tuigram-go-cache' },
+    env: {
+      ...process.env,
+      CGO_ENABLED: '0',
+      GOCACHE: process.env.GOCACHE || path.join(os.tmpdir(), 'tuiline-go-cache'),
+    },
   });
   if (result.error) process.stderr.write(`${result.error.message}\n`);
   process.exitCode = result.status ?? 1;

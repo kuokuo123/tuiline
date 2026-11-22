@@ -4,12 +4,12 @@
 // screen shown, like every other hot-reloaded key.
 /** @returns {string[]} */
 const instructions = () => [
-  Locale.t('To sign you in, tuigram needs a free Telegram API key.'),
+  Locale.t('To sign you in, tuiline needs a free Telegram API key.'),
   Locale.t('It takes about a minute:'),
   '',
   Locale.t('  1. open  https://my.telegram.org  and log in'),
   Locale.t('  2. choose "API development tools"'),
-  Locale.t('  3. fill in any app title and short name, e.g. "tuigram"'),
+  Locale.t('  3. fill in any app title and short name, e.g. "tuiline"'),
   Locale.t('  4. copy the api_id and api_hash shown on the next page'),
   '',
   Locale.t('Keep them to yourself, like a password.'),

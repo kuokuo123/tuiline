@@ -1,49 +1,49 @@
 #!/usr/bin/env bash
-# tuigram installer: a private Node.js plus tuigram from npm, no prerequisites.
+# tuiline installer: a private Node.js plus tuiline from npm, no prerequisites.
 #
-#   curl -fsSL https://raw.githubusercontent.com/leonid-shutov/tuigram/master/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/kuokuo123/tuiline/master/install.sh | bash
 #
-# tuigram needs Node >= 26.4 (node:ffi), opentui's per-platform library and better-sqlite3's
+# tuiline needs Node >= 26.4 (node:ffi), opentui's per-platform library and better-sqlite3's
 # native addon, which is ABI-bound to the Node that installed it. So this fetches the Node the
-# release asks for (its `engines.node`) into its own directory and installs tuigram with that
+# release asks for (its `engines.node`) into its own directory and installs tuiline with that
 # Node's npm -- the same recipe as the Homebrew formula and the PKGBUILD, minus the system Node.
 #
 # Layout (both directories overridable, see --help):
-#   ~/.local/bin/tuigram                     launcher: execs the private Node on tuigram.js
-#   ~/.local/lib/tuigram/install.json        receipt: tells bin/channel.js this is a script install
-#   ~/.local/lib/tuigram/node-vX.Y.Z-<os>-<arch>/
-#   ~/.local/lib/tuigram/lib/node_modules/tuigram/
+#   ~/.local/bin/tuiline                     launcher: execs the private Node on tuiline.js
+#   ~/.local/lib/tuiline/install.json        receipt: tells bin/channel.js this is a script install
+#   ~/.local/lib/tuiline/node-vX.Y.Z-<os>-<arch>/
+#   ~/.local/lib/tuiline/lib/node_modules/tuiline/
 #
-# Running it again upgrades in place; `tuigram upgrade` and the in-app upgrade do exactly that.
+# Running it again upgrades in place.
 # Written for bash 3.2 (macOS's /bin/bash). Everything runs from `main` on the last line, so a
 # download cut off mid-pipe runs nothing.
 
 set -euo pipefail
 
-INSTALLER_URL='https://raw.githubusercontent.com/leonid-shutov/tuigram/master/install.sh'
-REGISTRY='https://registry.npmjs.org/tuigram'
+INSTALLER_URL='https://raw.githubusercontent.com/kuokuo123/tuiline/master/install.sh'
+REGISTRY='https://registry.npmjs.org/tuiline'
 # The first release whose bin/channel.js knows the `script` channel. An older one would see its
 # own install as a plain npm prefix and upgrade itself through whatever npm is first on PATH.
 MIN_VERSION='1.3.0'
-# Marks a launcher as ours, so a re-run overwrites it but never someone else's `tuigram`.
-LAUNCHER_MARK='# tuigram-installer launcher'
+# Marks a launcher as ours, so a re-run overwrites it but never someone else's `tuiline`.
+LAUNCHER_MARK='# tuiline-installer launcher'
 
 usage() {
   cat <<EOF
-tuigram installer
+tuiline installer
 
 Usage: install.sh [options]
 
 Options:
   -v, --version <version>  install this version instead of the latest
-      --install-dir <dir>  where Node and tuigram go (default: ~/.local/lib/tuigram)
+      --install-dir <dir>  where Node and tuiline go (default: ~/.local/lib/tuiline)
       --no-modify-path     don't add the launcher's directory to your shell's rc file
   -h, --help               show this message
 
 Environment:
-  TUIGRAM_INSTALL_DIR      same as --install-dir
-  TUIGRAM_BIN_DIR          where the \`tuigram\` launcher goes (default: ~/.local/bin)
-  TUIGRAM_NODE_MIRROR      Node.js download mirror (default: https://nodejs.org/dist)
+  TUILINE_INSTALL_DIR      same as --install-dir
+  TUILINE_BIN_DIR          where the \`tuiline\` launcher goes (default: ~/.local/bin)
+  TUILINE_NODE_MIRROR      Node.js download mirror (default: https://nodejs.org/dist)
 
 Examples:
   curl -fsSL $INSTALLER_URL | bash
@@ -52,7 +52,7 @@ EOF
 }
 
 say() { printf '%s\n' "$*"; }
-warn() { printf 'tuigram: %s\n' "$*" >&2; }
+warn() { printf 'tuiline: %s\n' "$*" >&2; }
 die() {
   warn "$*"
   exit 1
@@ -60,8 +60,7 @@ die() {
 
 unsupported() {
   die "this installer supports Linux (glibc) and macOS on x64 and arm64, not $1.
-  Install with npm instead, which needs Node.js 26.4 or newer:  npm install -g tuigram
-  or with Homebrew:                                             brew install leonid-shutov/tap/tuigram"
+  Install from source instead; see https://github.com/kuokuo123/tuiline/blob/master/INSTALL.md"
 }
 
 need() { command -v "$1" >/dev/null 2>&1 || die "'$1' is required but not installed"; }
@@ -131,26 +130,26 @@ detect_platform() {
   fi
 }
 
-# Sets tuigram_version and node_major/node_min from the npm registry's manifest of $1.
-resolve_tuigram() {
+# Sets tuiline_version and node_major/node_min from the npm registry's manifest of $1.
+resolve_tuiline() {
   local tag=$1 manifest="$tmp/manifest.json" status engines
   status=$(curl -sSL -H 'Accept: application/json' -o "$manifest" -w '%{http_code}' "$REGISTRY/$tag") ||
     die 'could not reach the npm registry'
   case "$status" in
     200) ;;
-    404) die "tuigram $tag is not on npm (versions: https://www.npmjs.com/package/tuigram?activeTab=versions)" ;;
-    *) die "the npm registry answered HTTP $status for tuigram $tag" ;;
+    404) die "tuiline $tag is not on npm; install from source (see INSTALL.md)" ;;
+    *) die "the npm registry answered HTTP $status for tuiline $tag" ;;
   esac
   # The manifest is one line of compact JSON; its first "version" key is the top-level one.
-  tuigram_version=$(grep -o '"version":"[^"]*"' "$manifest" | sed -n '1s/"version":"\(.*\)"/\1/p' || true)
+  tuiline_version=$(grep -o '"version":"[^"]*"' "$manifest" | sed -n '1s/"version":"\(.*\)"/\1/p' || true)
   engines=$(sed -n 's/.*"engines":{[^}]*"node":"\([^"]*\)".*/\1/p' "$manifest")
-  [ -n "$tuigram_version" ] || die 'could not read the version from the npm registry'
-  [ -n "$engines" ] || die "could not read the Node.js version tuigram $tuigram_version needs"
+  [ -n "$tuiline_version" ] || die 'could not read the version from the npm registry'
+  [ -n "$engines" ] || die "could not read the Node.js version tuiline $tuiline_version needs"
   node_major=$(printf '%s' "$engines" | sed -n 's/^[^0-9]*\([0-9][0-9]*\).*/\1/p')
   node_min=$(printf '%s' "$engines" | sed -n 's/^[^0-9]*\([0-9][0-9.]*\).*/\1/p')
-  [ -n "$node_major" ] || die "could not make sense of tuigram's engines.node: $engines"
-  if version_lt "$tuigram_version" "$MIN_VERSION"; then
-    die "this installer needs tuigram $MIN_VERSION or newer (asked for $tuigram_version)"
+  [ -n "$node_major" ] || die "could not make sense of tuiline's engines.node: $engines"
+  if version_lt "$tuiline_version" "$MIN_VERSION"; then
+    die "this installer needs tuiline $MIN_VERSION or newer (asked for $tuiline_version)"
   fi
 }
 
@@ -169,7 +168,7 @@ ensure_node() {
   node_version=${node_name#node-}
   node_version=${node_version%%-*}
   if [ -n "$node_min" ] && version_lt "${node_version#v}" "$node_min"; then
-    die "the newest Node.js $node_major ($node_version) is older than the $node_min tuigram needs"
+    die "the newest Node.js $node_major ($node_version) is older than the $node_min tuiline needs"
   fi
 
   if [ -x "$install_dir/$node_name/bin/node" ]; then
@@ -185,13 +184,13 @@ ensure_node() {
   mv "$tmp/$node_name" "$install_dir/$node_name"
 }
 
-# npm-installs tuigram into a staging prefix with the private Node, checks it boots, then swaps it
+# npm-installs tuiline into a staging prefix with the private Node, checks it boots, then swaps it
 # in -- a failed install leaves the working one untouched.
-install_tuigram() {
+install_tuiline() {
   local node_dir="$install_dir/$node_name" staging="$tmp/prefix" staged target
-  staged="$staging/lib/node_modules/tuigram"
-  target="$install_dir/lib/node_modules/tuigram"
-  say "Installing tuigram $tuigram_version"
+  staged="$staging/lib/node_modules/tuiline"
+  target="$install_dir/lib/node_modules/tuiline"
+  say "Installing tuiline $tuiline_version"
   # PATH first: npm runs better-sqlite3's install script (prebuild-install, or node-gyp as a
   # fallback) through `node` on PATH, and the addon it fetches must match this Node's ABI.
   # --allow-scripts names it for npm's script allow-list, and --ignore-scripts=false overrides a
@@ -201,37 +200,37 @@ install_tuigram() {
     install --global --prefix "$staging" \
     --allow-scripts=better-sqlite3 --ignore-scripts=false \
     --no-fund --no-audit --no-update-notifier --loglevel=error \
-    "tuigram@$tuigram_version" ||
-    die "npm could not install tuigram $tuigram_version"
+    "tuiline@$tuiline_version" ||
+    die "npm could not install tuiline $tuiline_version"
 
   local reported
-  reported=$("$node_dir/bin/node" "$staged/bin/tuigram.js" --version) ||
-    die "the installed tuigram does not start"
-  [ "$reported" = "$tuigram_version" ] || die "installed tuigram reports $reported, expected $tuigram_version"
+  reported=$("$node_dir/bin/node" "$staged/bin/tuiline.js" --version) ||
+    die "the installed tuiline does not start"
+  [ "$reported" = "$tuiline_version" ] || die "installed tuiline reports $reported, expected $tuiline_version"
   # better-sqlite3 loads its addon lazily, on the first Database -- a bare require proves nothing.
   "$node_dir/bin/node" -e 'new (require(process.argv[1]))(":memory:").close()' \
     "$staged/node_modules/better-sqlite3" ||
     die "better-sqlite3's native addon does not load under Node.js in $node_dir"
 
   mkdir -p "$install_dir/lib/node_modules"
-  if [ -e "$target" ]; then mv "$target" "$tmp/previous-tuigram"; fi
+  if [ -e "$target" ]; then mv "$target" "$tmp/previous-tuiline"; fi
   mv "$staged" "$target"
 }
 
-# Runs before anything is downloaded: never overwrite a `tuigram` this installer didn't write
+# Runs before anything is downloaded: never overwrite a `tuiline` this installer didn't write
 # (npm's own bin symlink when npm's prefix is ~/.local, say).
 check_launcher() {
-  local launcher="$bin_dir/tuigram"
+  local launcher="$bin_dir/tuiline"
   if [ -e "$launcher" ] || [ -L "$launcher" ]; then
     grep -qF "$LAUNCHER_MARK" "$launcher" 2>/dev/null ||
-      die "$launcher already exists and is not this installer's (another tuigram install?).
-  Remove it, or choose another directory with TUIGRAM_BIN_DIR."
+      die "$launcher already exists and is not this installer's (another tuiline install?).
+  Remove it, or choose another directory with TUILINE_BIN_DIR."
   fi
   return 0
 }
 
 write_launcher() {
-  local launcher="$bin_dir/tuigram" next="$bin_dir/.tuigram.$$"
+  local launcher="$bin_dir/tuiline" next="$bin_dir/.tuiline.$$"
   mkdir -p "$bin_dir"
   {
     printf '#!/bin/sh\n'
@@ -239,7 +238,7 @@ write_launcher() {
     printf '# Written by %s; running it again rewrites this file.\n' "$INSTALLER_URL"
     printf 'exec %s %s "$@"\n' \
       "$(shell_quote "$install_dir/$node_name/bin/node")" \
-      "$(shell_quote "$install_dir/lib/node_modules/tuigram/bin/tuigram.js")"
+      "$(shell_quote "$install_dir/lib/node_modules/tuiline/bin/tuiline.js")"
   } >"$next"
   chmod 755 "$next"
   mv -f "$next" "$launcher"
@@ -252,13 +251,13 @@ write_receipt() {
   "installer": "$INSTALLER_URL",
   "binDir": "$bin_dir",
   "node": "$node_name",
-  "tuigram": "$tuigram_version"
+  "tuiline": "$tuiline_version"
 }
 EOF
   mv -f "$next" "$receipt"
 }
 
-# Keeps the Node just installed and the one the previous launcher pointed at: an older tuigram
+# Keeps the Node just installed and the one the previous launcher pointed at: an older tuiline
 # still running has that one as its execPath, and its launcher loop respawns through it.
 prune_node() {
   local previous=$1 dir name
@@ -310,12 +309,12 @@ add_to_path() {
   esac
 
   if [ -z "$rc" ]; then
-    warn "add $bin_dir to your PATH to run tuigram by name"
+    warn "add $bin_dir to your PATH to run tuiline by name"
     return
   fi
   if [ -f "$rc" ] && grep -qxF "$line" "$rc"; then return; fi
   mkdir -p "$(dirname "$rc")"
-  if printf '\n# tuigram\n%s\n' "$line" >>"$rc" 2>/dev/null; then
+  if printf '\n# tuiline\n%s\n' "$line" >>"$rc" 2>/dev/null; then
     say "Added $bin_dir to PATH in $rc"
     path_added=1
   else
@@ -325,8 +324,8 @@ add_to_path() {
 
 main() {
   local requested='' modify_path=1
-  install_dir=${TUIGRAM_INSTALL_DIR:-}
-  node_mirror=${TUIGRAM_NODE_MIRROR:-https://nodejs.org/dist}
+  install_dir=${TUILINE_INSTALL_DIR:-${TUIGRAM_INSTALL_DIR:-}}
+  node_mirror=${TUILINE_NODE_MIRROR:-${TUIGRAM_NODE_MIRROR:-https://nodejs.org/dist}}
   node_mirror=${node_mirror%/}
   path_added=0
 
@@ -362,13 +361,13 @@ main() {
     die "'sha256sum' or 'shasum' is required but not installed"
   detect_platform
 
-  install_dir=${install_dir:-$HOME/.local/lib/tuigram}
+  install_dir=${install_dir:-$HOME/.local/lib/tuiline}
   mkdir -p "$install_dir" || die "could not create $install_dir"
   # Physical path: bin/channel.js matches against realpathSync, so the receipt must agree with it.
   install_dir=$(cd "$install_dir" && pwd -P)
   receipt="$install_dir/install.json"
   # An upgrade (which passes only --install-dir) keeps the launcher where the first install put it.
-  bin_dir=${TUIGRAM_BIN_DIR:-$(receipt_value binDir)}
+  bin_dir=${TUILINE_BIN_DIR:-${TUIGRAM_BIN_DIR:-$(receipt_value binDir)}}
   bin_dir=${bin_dir:-$HOME/.local/bin}
   case "$install_dir$bin_dir" in
     *'"'* | *\\*) die 'install paths must not contain double quotes or backslashes' ;;
@@ -378,34 +377,34 @@ main() {
   mkdir "$install_dir/.lock" 2>/dev/null ||
     die "another install is running (if not, remove $install_dir/.lock)"
   tmp=''
-  trap 'rm -rf "${tmp:-}" "$bin_dir/.tuigram.$$" "$install_dir/.install.json.$$"; rmdir "$install_dir/.lock" 2>/dev/null || true' EXIT
+  trap 'rm -rf "${tmp:-}" "$bin_dir/.tuiline.$$" "$install_dir/.install.json.$$"; rmdir "$install_dir/.lock" 2>/dev/null || true' EXIT
   trap 'exit 130' INT TERM
   tmp=$(mktemp -d "$install_dir/.tmp.XXXXXX")
 
   local previous_node
   previous_node=$(receipt_value node)
 
-  resolve_tuigram "${requested:-latest}"
+  resolve_tuiline "${requested:-latest}"
   ensure_node
-  install_tuigram
+  install_tuiline
   write_launcher
   write_receipt
   prune_node "$previous_node"
   if [ "$modify_path" = 1 ]; then add_to_path; fi
 
   local found
-  found=$(command -v tuigram 2>/dev/null || true)
-  if [ -n "$found" ] && [ "$found" != "$bin_dir/tuigram" ]; then
-    warn "another tuigram ($found) comes first on your PATH and will run instead of this one"
+  found=$(command -v tuiline 2>/dev/null || true)
+  if [ -n "$found" ] && [ "$found" != "$bin_dir/tuiline" ]; then
+    warn "another tuiline ($found) comes first on your PATH and will run instead of this one"
   fi
 
   say ''
-  say "tuigram $tuigram_version is installed."
+  say "tuiline $tuiline_version is installed."
   say ''
   if [ "$path_added" = 1 ]; then say "  exec \$SHELL      # or open a new terminal, to pick up PATH"; fi
-  say '  tuigram          # start it'
+  say '  tuiline          # start it'
   say ''
-  say "To uninstall:  rm -rf '$install_dir' '$bin_dir/tuigram'"
+  say "To uninstall:  rm -rf '$install_dir' '$bin_dir/tuiline'"
 }
 
 main "$@"

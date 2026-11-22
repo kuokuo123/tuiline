@@ -30,7 +30,7 @@ const attempt = async () => {
 };
 
 // A key the form can fix: one Telegram did not accept, unless it came from the environment —
-// the form cannot change TUIGRAM_API_ID / TUIGRAM_API_HASH, so that one ends in auth.fail.
+// the form cannot change TUILINE_API_ID / TUILINE_API_HASH (or legacy TUIGRAM_*), so that one ends in auth.fail.
 /** @param {unknown} error */
 const fixable = (error) => self.keyRejected(error) && config.credentials.source !== 'env';
 

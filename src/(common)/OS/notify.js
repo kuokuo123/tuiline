@@ -1,6 +1,6 @@
 /** @type {Record<string, (title: string, text: string) => [string, string[]]>} */
 const platforms = {
-  linux: (title, text) => ['notify-send', ['--app-name=tuigram', title, text]],
+  linux: (title, text) => ['notify-send', ['--app-name=tuiline', title, text]],
   darwin: (title, text) => [
     'osascript',
     ['-e', `display notification ${JSON.stringify(text)} with title ${JSON.stringify(title)}`],

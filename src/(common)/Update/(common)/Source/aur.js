@@ -11,7 +11,7 @@ async () => {
   const body = await Fetch.text(ENDPOINT, {
     accept: 'application/json',
     'accept-encoding': 'identity',
-    'user-agent': `tuigram/${packageVersion}`,
+    'user-agent': `tuiline/${packageVersion}`,
   });
   if (body === null) return null;
 

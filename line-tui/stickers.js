@@ -1,7 +1,10 @@
 'use strict';
 
+const { terminalTheme } = require('./theme');
+
 async function createStickerPicker(renderer, backend, { parent, getContext, getView, onClose }) {
   const { BoxRenderable: Box, TextRenderable: Text, ImageRenderable: Image } = await import('@opentui/core');
+  const theme = await terminalTheme();
   // eslint-disable-next-line no-control-regex
   const clean = (value) => String(value ?? '').replace(/[\x00-\x1f\x7f-\x9f]/g, ' ');
   const overlay = new Box(renderer, {
@@ -12,11 +15,11 @@ async function createStickerPicker(renderer, backend, { parent, getContext, getV
     width: '100%',
     height: '100%',
     flexDirection: 'column',
-    backgroundColor: '#101714',
+    backgroundColor: theme.background,
     zIndex: 12,
     visible: false,
   });
-  const title = new Text(renderer, { fg: '#06c755', height: 2 });
+  const title = new Text(renderer, { fg: theme.accent, height: 2 });
   const body = new Box(renderer, {
     id: 'line-sticker-grid',
     flexGrow: 1,
@@ -24,7 +27,7 @@ async function createStickerPicker(renderer, backend, { parent, getContext, getV
     flexDirection: 'column',
     overflow: 'hidden',
   });
-  const note = new Text(renderer, { id: 'line-sticker-note', fg: '#06c755', height: 3 });
+  const note = new Text(renderer, { id: 'line-sticker-note', fg: theme.accent, height: 3 });
   let cells = [];
   let gridKey = '';
   const thumbnails = new Map();
@@ -119,7 +122,7 @@ async function createStickerPicker(renderer, backend, { parent, getContext, getV
             height: 7,
             border: Boolean(item),
             flexDirection: 'column',
-            borderColor: '#385044',
+            borderColor: theme.muted,
           });
           row.add(card);
           if (!item) continue;
@@ -131,7 +134,7 @@ async function createStickerPicker(renderer, backend, { parent, getContext, getV
             fit: 'fit',
             protocol: 'auto',
           });
-          const label = new Text(renderer, { height: 1, fg: '#d8e5dd', wrapMode: 'none' });
+          const label = new Text(renderer, { height: 1, fg: theme.foreground, wrapMode: 'none' });
           card.add(image);
           card.add(label);
           cells.push({ card, image, label, item, index });
@@ -148,9 +151,9 @@ async function createStickerPicker(renderer, backend, { parent, getContext, getV
       const source = thumbnails.get(key);
       if (cell.image.source !== source) cell.image.source = source;
       const highlighted = Boolean(catalog.selected) || cell.index === cursor;
-      cell.card.borderColor = highlighted ? '#06c755' : '#385044';
-      cell.card.backgroundColor = highlighted ? '#20382a' : '#101714';
-      cell.label.fg = '#d8e5dd';
+      cell.card.borderColor = highlighted ? theme.accent : theme.muted;
+      cell.card.backgroundColor = highlighted ? theme.selectionBackground : theme.background;
+      cell.label.fg = highlighted ? theme.selectionForeground : theme.foreground;
       cell.label.content = `${highlighted ? '›' : ' '} ${cell.index + 1} · ${clean(cell.item.id)}`;
       if (!catalog.selected && !source && !requested.has(key)) {
         requested.add(key);

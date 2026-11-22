@@ -4,9 +4,9 @@
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) {
-  process.stdout.write(`tuigram — LINE in your terminal
+  process.stdout.write(`tuiline — LINE in your terminal
 
-Usage: tuigram [--demo] [--backend /path/to/line-gui]
+Usage: tuiline [--demo] [--backend /path/to/line-gui]
 
 h / l               leave / enter conversation focus
 Tab                 switch sidebar / conversation scroll mode
@@ -49,7 +49,7 @@ Legacy Telegram client: node bin/telegram.js
   require('../line-tui/app')
     .main(args)
     .catch((error) => {
-      process.stderr.write(`tuigram: ${error.message}\n`);
+      process.stderr.write(`tuiline: ${error.message}\n`);
       process.exitCode = 1;
     });
 }

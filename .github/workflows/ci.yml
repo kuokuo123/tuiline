@@ -21,7 +21,7 @@ jobs:
       - run: npm test
 
   # install.sh is served straight from master, so it is tested here rather than at release time:
-  # a fresh install, then a second run over it (what `tuigram upgrade` does), on each platform it
+  # a fresh install, then a second run over it, on each platform it
   # supports. /bin/bash on purpose: on macOS that is bash 3.2, the one curl | bash users get.
   installer:
     strategy:
@@ -33,8 +33,8 @@ jobs:
       # The runner context does not exist at job level, so these can't live in a job `env:`.
       - name: Point the installer at the runner's temp dir
         run: |
-          echo "TUIGRAM_INSTALL_DIR=$RUNNER_TEMP/tuigram" >> "$GITHUB_ENV"
-          echo "TUIGRAM_BIN_DIR=$RUNNER_TEMP/bin" >> "$GITHUB_ENV"
+          echo "TUILINE_INSTALL_DIR=$RUNNER_TEMP/tuiline" >> "$GITHUB_ENV"
+          echo "TUILINE_BIN_DIR=$RUNNER_TEMP/bin" >> "$GITHUB_ENV"
       - uses: actions/checkout@v7
       - if: runner.os == 'Linux'
         run: shellcheck install.sh
@@ -47,9 +47,9 @@ jobs:
           /bin/bash "$RUNNER_TEMP/install.sh" --no-modify-path
       - name: Check the install
         run: |
-          "$TUIGRAM_BIN_DIR/tuigram" --version
+          "$TUILINE_BIN_DIR/tuiline" --version
           # no .lock or .tmp.* left behind (an `if`, since set -e ignores a `!`-negated command)
-          if ls -A "$TUIGRAM_INSTALL_DIR" | grep '^\.'; then echo 'left behind ^'; exit 1; fi
-          root="$(cd "$TUIGRAM_INSTALL_DIR/lib/node_modules/tuigram" && pwd -P)"
+          if ls -A "$TUILINE_INSTALL_DIR" | grep '^\.'; then echo 'left behind ^'; exit 1; fi
+          root="$(cd "$TUILINE_INSTALL_DIR/lib/node_modules/tuiline" && pwd -P)"
           kind="$(node -p 'require("./bin/channel").detect(process.argv[1])' "$root")"
           [ "$kind" = script ] || { echo "detected as $kind, not script"; exit 1; }

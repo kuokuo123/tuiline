@@ -3,26 +3,26 @@
 const path = require('path');
 const { existsSync, accessSync, readdirSync, constants } = require('fs');
 
-// brew's formula (rewrite_shebang + bin.install_symlink) roots tuigram at
+// The legacy upstream brew formula (rewrite_shebang + bin.install_symlink) roots tuigram at
 // <prefix>/Cellar/tuigram/<version>/libexec/lib/node_modules/tuigram; npm's global install roots
-// it at <prefix>/lib/node_modules/tuigram on POSIX (Windows npm installs skip the `lib/` layer
+// tuiline at <prefix>/lib/node_modules/tuiline on POSIX (Windows npm installs skip the `lib/` layer
 // entirely -- see WIN_GLOBAL below). realpathSync gives back backslash paths on Windows, so
 // rootDir is normalized to forward slashes before any of these run; brew/pacman never exist on
 // Windows, so CELLAR/AUR_ROOT stay POSIX-only by construction.
 const CELLAR = /\/Cellar\/tuigram\/[^/]+\/libexec\/lib\/node_modules\/tuigram$/;
-const GLOBAL = /\/lib\/node_modules\/tuigram$/;
-const NPM_SUFFIX = '/lib/node_modules/tuigram';
+const GLOBAL = /\/lib\/node_modules\/tuiline$/;
+const NPM_SUFFIX = '/lib/node_modules/tuiline';
 
 // Windows-only, gated on process.platform: without that gate, a POSIX checkout sitting under
-// some unrelated project's local node_modules/tuigram would also match this shape.
-const WIN_GLOBAL = /\/node_modules\/tuigram$/;
-const WIN_NPM_SUFFIX = '/node_modules/tuigram';
+// some unrelated project's local node_modules/tuiline would also match this shape.
+const WIN_GLOBAL = /\/node_modules\/tuiline$/;
+const WIN_NPM_SUFFIX = '/node_modules/tuiline';
 
 // mise's npm backend doesn't go through lib/node_modules at all -- its bin is a shim that execs
-// Node directly on .../mise/installs/npm-tuigram/<version>/node_modules/.mise/tuigram@<version>/
-// node_modules/tuigram/bin/tuigram.js. The `.*` covers that `.mise/tuigram@<version>/` dedup
+// Node directly on .../mise/installs/npm-tuiline/<version>/node_modules/.mise/tuiline@<version>/
+// node_modules/tuiline/bin/tuiline.js. The `.*` covers that `.mise/tuiline@<version>/` dedup
 // layer, which is mise's own linker's implementation detail and not worth pinning exactly.
-const MISE = /\/mise\/installs\/npm-tuigram\/.*\/node_modules\/tuigram$/;
+const MISE = /\/mise\/installs\/npm-tuiline\/.*\/node_modules\/tuiline$/;
 
 // Arch's npm prefix is /usr, so the AUR package's `npm install --prefix /usr` lands at exactly
 // the same path a plain `sudo npm i -g` would use -- GLOBAL alone can't tell them apart. Only
@@ -47,11 +47,11 @@ const npmPrefix = (rootDir) => {
   return null;
 };
 
-// install.sh npm-installs into a prefix of its own (~/.local/lib/tuigram) with a private Node, so
+// install.sh npm-installs into a prefix of its own (~/.local/lib/tuiline) with a private Node, so
 // by path alone it is indistinguishable from npm's global layout -- its receipt is what tells them
 // apart. It matters: an npm upgrade would run whichever npm is on PATH, against whichever Node,
 // and better_sqlite3.node is ABI-bound to the Node that fetched it.
-const INSTALLER = 'https://raw.githubusercontent.com/leonid-shutov/tuigram/master/install.sh';
+const INSTALLER = 'https://raw.githubusercontent.com/kuokuo123/tuiline/master/install.sh';
 const SCRIPT_RECEIPT = 'install.json';
 
 // git checked before Cellar/global/mise/aur: an `npm link`ed checkout sits under lib/node_modules
@@ -101,8 +101,8 @@ const npmPlan = (rootDir, version) => {
   if (prefix === null) return null;
   return {
     prefix,
-    manualCommand: `npm i -g tuigram@${version}`,
-    steps: [{ cmd: 'npm', args: ['install', '--global', `--prefix=${prefix}`, `tuigram@${version}`] }],
+    manualCommand: `npm i -g tuiline@${version}`,
+    steps: [{ cmd: 'npm', args: ['install', '--global', `--prefix=${prefix}`, `tuiline@${version}`] }],
   };
 };
 
@@ -128,7 +128,7 @@ const brewPlan = (rootDir) => {
 const misePlan = () => ({
   prefix: null,
   manualCommand: null,
-  steps: [{ cmd: 'mise', args: ['upgrade', 'npm:tuigram'] }],
+  steps: [{ cmd: 'mise', args: ['upgrade', 'npm:tuiline'] }],
 });
 
 // pacman's package is the source of truth here, and only an AUR helper knows which one the user

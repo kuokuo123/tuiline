@@ -10,6 +10,6 @@
   'app.openConfig': { title: 'Edit config', run: () => actions.openConfig() },
   'app.restart': { title: 'Restart', run: () => actions.restart() },
   'app.errors': { title: 'Errors', run: () => ui.errors.advance() },
-  'app.upgrade': { title: 'Upgrade tuigram', run: () => actions.upgrade() },
+  'app.upgrade': { title: 'Upgrade tuiline', run: () => actions.upgrade() },
   'app.dismissUpdate': { title: 'Dismiss update', run: () => actions.dismissUpdate() },
 });

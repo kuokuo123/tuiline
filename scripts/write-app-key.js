@@ -1,7 +1,7 @@
 'use strict';
 
 // Writes the app key every installed copy ships with into app-key.json at the package root, from the
-// TUIGRAM_SHIPPED_API_ID / TUIGRAM_SHIPPED_API_HASH secrets. Runs in the publish workflow right
+// TUILINE_SHIPPED_API_ID / TUILINE_SHIPPED_API_HASH secrets. Runs in the publish workflow right
 // before `npm publish`, so the key reaches the npm tarball (and every channel built from it) but
 // never git. Each half is stored base64-encoded and split into fragments: not secrecy — anyone
 // can unpack the tarball — only enough that a scraper grepping for a 32-hex hash walks past it.
@@ -14,11 +14,11 @@ const FRAGMENT = 9;
 const API_ID = /^[1-9]\d*$/u;
 const TARGET = path.resolve(__dirname, '..', 'app-key.json');
 
-const id = process.env.TUIGRAM_SHIPPED_API_ID?.trim() ?? '';
-const hash = process.env.TUIGRAM_SHIPPED_API_HASH?.trim() ?? '';
+const id = (process.env.TUILINE_SHIPPED_API_ID ?? process.env.TUIGRAM_SHIPPED_API_ID)?.trim() ?? '';
+const hash = (process.env.TUILINE_SHIPPED_API_HASH ?? process.env.TUIGRAM_SHIPPED_API_HASH)?.trim() ?? '';
 
 if (!API_ID.test(id) || hash === '') {
-  process.stderr.write('write-app-key: TUIGRAM_SHIPPED_API_ID and TUIGRAM_SHIPPED_API_HASH must both be set\n');
+  process.stderr.write('write-app-key: TUILINE_SHIPPED_API_ID and TUILINE_SHIPPED_API_HASH must both be set\n');
   process.exit(1);
 }
 
