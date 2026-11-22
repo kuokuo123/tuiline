@@ -604,7 +604,7 @@ func (e *Engine) draft(c Command) {
 	}
 }
 func (e *Engine) send(c Command) {
-	if !e.available(c) || c.Text != e.state.Draft || c.AttachmentID != "" && e.state.Attachment == nil || e.state.Stickers.Selected != nil {
+	if !e.available(c) || (e.state.Attachment == nil && c.Text != e.state.Draft) || c.AttachmentID != "" && e.state.Attachment == nil || e.state.Stickers.Selected != nil {
 		return
 	}
 	if len(c.Mentions) > 0 {

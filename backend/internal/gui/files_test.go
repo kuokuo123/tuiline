@@ -11,6 +11,29 @@ import (
 )
 
 func fileURL(path string) string { return (&url.URL{Scheme: "file", Path: path}).String() }
+func TestAttachmentSendPreservesTextDraft(t *testing.T) {
+	e := NewEngine(Operations{}, nil)
+	defer e.Close()
+	e.Handle(Command{Action: "mode", Mode: "demo"})
+	v := e.View()
+	c := Command{ID: v.SelectedID, Session: v.Session, Selection: v.Selection}
+	c.Action, c.Text, c.Sequence = "draft", "keep this draft", 1
+	e.Handle(c)
+	e.mu.Lock()
+	e.state.Attachment = &Attachment{ID: "file-id", Name: "report.txt", Size: 4, Data: []byte("file")}
+	e.mu.Unlock()
+	c.Action, c.Text, c.AttachmentID = "send", "", "file-id"
+	e.Handle(c)
+	e.Wait()
+	v = e.View()
+	if v.Draft != "keep this draft" || v.Attachment != nil || v.SendStatus != "idle" {
+		t.Fatalf("attachment send lost draft or failed: %+v", v)
+	}
+	if len(v.Messages) == 0 || v.Messages[len(v.Messages)-1].FileName != "report.txt" {
+		t.Fatal("attachment was not sent")
+	}
+}
+
 func TestSnapshotRejectsSymlinkAndSpecialFile(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "real")

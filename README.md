@@ -51,10 +51,23 @@ npm run dev -- --demo
 | PageUp/PageDown          | Scroll loaded history                                           |
 | g then x                 | Open links in the marked message; pick a link if several        |
 | Ctrl+R                   | Refresh                                                         |
+| Ctrl+S in scroll mode    | Save the selected attachment to your system Downloads folder    |
+| Ctrl+T                   | Pick files and upload them immediately to the current chat      |
 | Ctrl+L                   | Start or retry QR login                                         |
 | Ctrl+Y                   | Confirm login when requested                                    |
 | Ctrl+X                   | Cancel login                                                    |
 | Ctrl+C                   | Quit                                                            |
+
+File transfers support up to **20 MiB per file**. Ctrl+S saves the selected file,
+image, video, or audio attachment directly to your system Downloads folder (XDG),
+adding a numeric suffix when the filename already exists; existing files are never
+overwritten. Ctrl+T uses `zenity` or `kdialog` for multi-file selection when a desktop
+session is available. Install either picker for graphical selection. If neither is
+usable, enter paths in the terminal prompt, separated by spaces; quote paths that
+contain spaces, for example `"~/Documents/my report.pdf" ~/photo.jpg`. Press Enter
+to upload immediately, or Escape to cancel. Files are sent individually, preserving
+your text draft. An uncertain send stops the queue: check LINE before retrying.
+Rebuild the backend with `npm run build:line` after updating.
 
 In a group chat, press `i` to type, then type `@` to list group members.
 Type part of a name to filter, use Up/Down to select, and press Enter or Tab

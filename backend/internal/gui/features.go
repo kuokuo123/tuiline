@@ -40,6 +40,7 @@ func (e *Engine) feature(c Command) {
 		if e.current(c) {
 			e.fileGeneration++
 			e.fileBusy = false
+			e.state.FileStatus = "idle"
 			e.state.Attachment = nil
 		}
 		return
@@ -152,9 +153,12 @@ func (e *Engine) attach(c Command) {
 		return
 	}
 	e.fileBusy = true
+	e.state.FileStatus = "pending"
+	e.state.SendNote = ""
 	epoch := e.epoch
 	generation := e.fileGeneration + 1
 	e.fileGeneration = generation
+	e.publish()
 	e.spawn(func() {
 		file, err := snapshotFile(c.URL)
 		e.mu.Lock()
@@ -163,6 +167,7 @@ func (e *Engine) attach(c Command) {
 			return
 		}
 		e.fileBusy = false
+		e.state.FileStatus = "idle"
 		if err != nil {
 			e.state.SendNote = "添付は20 MiB以下の通常ファイルを選んでください。リンクや特殊ファイルは使えません"
 		} else {

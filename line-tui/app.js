@@ -6,12 +6,22 @@ const { playVideo } = require('./video');
 const { createStickerPicker } = require('./stickers');
 const { createMentionPicker } = require('./mentions');
 const { createLoginLog } = require('./login-log');
+const { pickFiles, parsePaths, uploadFiles, downloadFile } = require('./files');
 
 // Remote strings are plain text; strip terminal control bytes before display.
 // eslint-disable-next-line no-control-regex
 const clean = (value) => String(value ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 
-async function createApp(renderer, backend, { openLink = openUrl, playVideo: playback = playVideo } = {}) {
+async function createApp(
+  renderer,
+  backend,
+  {
+    openLink = openUrl,
+    playVideo: playback = playVideo,
+    pickFiles: chooseFiles = pickFiles,
+    downloadFile: saveFile = downloadFile,
+  } = {},
+) {
   const { default: stringWidth } = await import('string-width');
   const {
     BoxRenderable: Box,
@@ -105,6 +115,17 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
   pane.add(loginText);
   pane.add(linkPicker);
   pane.add(input);
+  const fileInput = new Input(renderer, {
+    id: 'line-file-paths',
+    height: 1,
+    width: '100%',
+    maxLength: 16000,
+    visible: false,
+    placeholder: 'File paths (quote paths with spaces) · Enter uploads · Esc cancels',
+    textColor: '#ffffff',
+    focusedBackgroundColor: '#20382a',
+  });
+  pane.add(fileInput);
   const expandedView = new Box(renderer, {
     id: 'line-expanded-view',
     position: 'absolute',
@@ -219,6 +240,11 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
   let expandedMessageId = '';
   let videoController;
   let videoControls;
+  let transferController;
+  let transferScope;
+  let transferNote = '';
+  let pathPrompt;
+  let disposed = false;
   const safeImage = (source) =>
     typeof source === 'string' &&
     source.length <= 2800000 &&
@@ -294,7 +320,7 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
     }
     mode = nextMode;
     prefixAt = 0;
-    if (mode === 'insert') input.focus();
+    if (mode === 'insert' && !transferController) input.focus();
     else input.blur();
     chats.borderColor = mode === 'chats' ? green : '#385044';
     pane.borderColor = mode === 'chats' ? '#385044' : green;
@@ -305,7 +331,7 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
       history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k select · ^D/^U page · r reply · i insert · h chats`,
       insert: 'INSERT · Enter send · Esc scroll · Tab chats',
     };
-    hints.content = ` ${help[mode]} · l links/media · s stickers · ^R refresh · ^C quit`;
+    hints.content = ` ${help[mode]} · ^S download · ^T upload · l media · s stickers · ^C quit`;
     if (mode === 'history') {
       if (previousMode === 'chats' && messageRows[messageCursor]) {
         if (messageCursor === messageRows.length - 1) history.scrollTo(history.scrollHeight);
@@ -313,6 +339,99 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
       }
       // eslint-disable-next-line no-use-before-define
       requestPreview();
+    }
+  };
+  const askPaths = () =>
+    new Promise((resolve) => {
+      pathPrompt = resolve;
+      fileInput.value = '';
+      fileInput.visible = true;
+      input.blur();
+      fileInput.focus();
+      transferNote = 'No file picker available. Enter file paths; quote paths containing spaces.';
+      status.content = transferNote;
+    });
+  const closePaths = (files) => {
+    const resolve = pathPrompt;
+    if (!resolve) return;
+    pathPrompt = undefined;
+    fileInput.blur();
+    fileInput.visible = false;
+    resolve?.(files);
+  };
+  fileInput.on(InputRenderableEvents.ENTER, () => {
+    if (!pathPrompt) return;
+    try {
+      closePaths(parsePaths(fileInput.value));
+    } catch (error) {
+      status.content = clean(error.message);
+    }
+  });
+  const startTransfer = async (upload) => {
+    if (
+      transferController ||
+      !view.selectedId ||
+      failed ||
+      view.busy ||
+      view.status !== 'ready' ||
+      ['pending', 'uncertain'].includes(view.sendStatus) ||
+      view.attachment
+    ) {
+      return;
+    }
+    const selected = messageRows[messageCursor]?.message;
+    if (!upload && (mode !== 'history' || !selected?.downloadable)) {
+      status.content = ' Select a downloadable file, image, video, or audio message in scroll mode.';
+      return;
+    }
+    flushDraft();
+    const scope = context();
+    transferScope = scope;
+    const previousMode = mode;
+    const replyTo = view.reply?.id || '';
+    transferController = new AbortController();
+    const { signal } = transferController;
+    input.blur();
+    // eslint-disable-next-line no-use-before-define
+    mentionPicker.close();
+    backend.command({ action: 'preview-close', ...scope });
+    previewTarget = '';
+    const progress = (note) => {
+      if (disposed) return;
+      transferNote = note;
+      status.content = clean(note);
+    };
+    try {
+      if (upload) {
+        progress('Choose files to upload…');
+        let files = await chooseFiles(signal);
+        signal.throwIfAborted();
+        files ??= await askPaths();
+        signal.throwIfAborted();
+        if (files.length) {
+          await uploadFiles(backend, scope, files, { signal, replyTo, onProgress: progress });
+          progress(`Uploaded ${files.length} file(s).`);
+        } else {
+          progress('Upload canceled.');
+        }
+      } else {
+        progress('Downloading… · Esc cancel');
+        const file = await saveFile(backend, scope, selected, { signal, onProgress: progress });
+        progress(`Saved to ${file}`);
+      }
+    } catch (error) {
+      progress(
+        error.name === 'AbortError'
+          ? 'Transfer canceled. Check LINE before retrying any upload already in progress.'
+          : error.message,
+      );
+      backend.command({ action: 'file-cancel', ...scope });
+      backend.command({ action: 'attach-cancel', ...scope });
+    } finally {
+      closePaths([]);
+      transferController = undefined;
+      transferScope = undefined;
+      if (!disposed) focus(previousMode);
     }
   };
   const revealChat = () => {
@@ -402,7 +521,8 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
       mode !== 'history' ||
       view.status !== 'ready' ||
       view.busy ||
-      view.sendStatus === 'pending'
+      view.sendStatus === 'pending' ||
+      transferController
     ) {
       return;
     }
@@ -451,6 +571,15 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
   };
   const onState = (next) => {
     if (failed) return;
+    if (
+      transferController &&
+      (next.session !== transferScope.session ||
+        next.selectedId !== transferScope.id ||
+        next.selection !== transferScope.selection)
+    ) {
+      transferController.abort();
+      closePaths([]);
+    }
     const changed = next.selectedId !== view.selectedId || next.session !== view.session;
     const cursorId = changed ? next.selectedId : view.chats[cursor]?.id;
     view = next;
@@ -591,9 +720,12 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
       : '';
     // eslint-disable-next-line max-len
     status.content = ` ${replyHint}${clean(view.statusText)}\n ${clean(view.sendNote || view.historyNote || '')}${view.sendStatus === 'pending' ? ' Sending…' : ''}`;
+    if (transferNote) status.content = clean(transferNote);
   };
   backend.on('state', onState);
   backend.on('failure', (message) => {
+    transferController?.abort();
+    closePaths([]);
     videoController?.abort();
     failed = true;
     stickerPicker.dismiss();
@@ -660,6 +792,29 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
     }
     if (key.ctrl && name === 'c') {
       renderer.destroy();
+      return;
+    }
+    if (transferController) {
+      if (name === 'escape') {
+        key.preventDefault?.();
+        closePaths([]);
+        transferController.abort();
+      } else if (!pathPrompt) {
+        key.preventDefault?.();
+      }
+      return;
+    }
+    transferNote = '';
+    if (
+      key.ctrl &&
+      ['s', 't'].includes(name) &&
+      !stickerPicker.active &&
+      !expandedMessageId &&
+      !videoController &&
+      !linkChoices.length
+    ) {
+      key.preventDefault?.();
+      void startTransfer(name === 't');
       return;
     }
     if (key.ctrl && name.toLowerCase() === 'l') {
@@ -942,6 +1097,9 @@ async function createApp(renderer, backend, { openLink = openUrl, playVideo: pla
   return {
     onState,
     dispose: () => {
+      disposed = true;
+      transferController?.abort();
+      closePaths([]);
       stickerPicker.dispose();
       videoController?.abort();
       clearTimeout(draftTimer);
