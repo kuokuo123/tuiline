@@ -59,8 +59,10 @@ test('sticker picker previews hashed images, browses packs/pages, and sends only
   setup.mockInput.pressKey('r');
   assert.equal(commands.filter((command) => command.action === 'sticker-preview').length, previewRequests + 1);
   const highlighted = setup.renderer.root.findDescendantById('line-sticker-cell-1');
+  assert.equal(setup.renderer.root.findDescendantById('line-sticker-cell-0').borderColor.slot, 0);
+  assert.equal(highlighted.borderColor.slot, 2);
   assert.equal(highlighted.backgroundColor.intent, 'indexed');
-  assert.equal(highlighted.backgroundColor.slot, 7);
+  assert.equal(highlighted.backgroundColor.slot, 4);
   const preview = setup.renderer.root.findDescendantById('line-sticker-preview-1');
   await preview.loadPromise;
   await setup.renderOnce();

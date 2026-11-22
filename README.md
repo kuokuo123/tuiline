@@ -35,9 +35,11 @@ npm run dev -- --demo
 The interface uses your terminal's default foreground/background and ANSI 16-color
 palette, including its green accent. Selections and reply highlights use palette
 colors too, so your terminal theme controls the UI rather than fixed RGB colors.
-Selected messages outside reply threads use ANSI blue (slot 4) with black text
-(slot 0). Reply threads alternate gray backgrounds (slots 7 and 8), with bright-white
-text (slot 15); the `›` marker indicates the selected message within a thread.
+Selected chats and messages outside reply threads use ANSI blue (slot 4) with
+bold black text (slot 0). Picker highlights also use blue (slot 4).
+Reply threads alternate black and bright-black
+backgrounds (slots 0 and 8, corresponding to SGR 40/100), with white text (slot 7);
+the `›` marker indicates the selected message within a thread.
 
 The package and command are named `tuiline` (`node bin/tuiline.js` or `npm run dev`
 from this checkout). Upstream attribution and legacy saved-data compatibility keep

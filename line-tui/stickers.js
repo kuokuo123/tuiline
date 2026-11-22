@@ -122,7 +122,7 @@ async function createStickerPicker(renderer, backend, { parent, getContext, getV
             height: 7,
             border: Boolean(item),
             flexDirection: 'column',
-            borderColor: theme.muted,
+            borderColor: theme.border,
           });
           row.add(card);
           if (!item) continue;
@@ -151,7 +151,7 @@ async function createStickerPicker(renderer, backend, { parent, getContext, getV
       const source = thumbnails.get(key);
       if (cell.image.source !== source) cell.image.source = source;
       const highlighted = Boolean(catalog.selected) || cell.index === cursor;
-      cell.card.borderColor = highlighted ? theme.accent : theme.muted;
+      cell.card.borderColor = highlighted ? theme.accent : theme.border;
       cell.card.backgroundColor = highlighted ? theme.selectionBackground : theme.background;
       cell.label.fg = highlighted ? theme.selectionForeground : theme.foreground;
       cell.label.content = `${highlighted ? '›' : ' '} ${cell.index + 1} · ${clean(cell.item.id)}`;

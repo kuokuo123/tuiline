@@ -31,6 +31,7 @@ async function createApp(
     ScrollBoxRenderable: ScrollBox,
     ImageRenderable: Image,
     InputRenderableEvents,
+    TextAttributes,
   } = await import('@opentui/core');
   const theme = await terminalTheme();
   const green = theme.accent;
@@ -62,7 +63,7 @@ async function createApp(
     minWidth: 0,
     flexDirection: 'column',
     border: true,
-    borderColor: theme.muted,
+    borderColor: theme.border,
     titleColor: theme.foreground,
     title: ' Messages ',
   });
@@ -307,6 +308,8 @@ async function createApp(
       row.backgroundColor = color ? color[0] : selectionColor;
       text.fg = color ? color[1] : foreground;
       marker.fg = color ? color[1] : markerColor;
+      text.attributes = active ? TextAttributes.BOLD : 0;
+      marker.attributes = active ? TextAttributes.BOLD : 0;
       const relationMarker = linked ? '↪' : ' ';
       marker.content = active ? '›' : relationMarker;
     }
@@ -322,8 +325,8 @@ async function createApp(
     prefixAt = 0;
     if (mode === 'insert' && !transferController) input.focus();
     else input.blur();
-    chats.borderColor = mode === 'chats' ? green : theme.muted;
-    pane.borderColor = mode === 'chats' ? theme.muted : green;
+    chats.borderColor = mode === 'chats' ? green : theme.border;
+    pane.borderColor = mode === 'chats' ? theme.border : green;
     highlightMessages();
     const help = {
       chats: 'CHATS · j/k select · l/Enter conversation · i insert',
@@ -488,9 +491,11 @@ async function createApp(
     }
     for (const [index, { row, marker, label }] of chatRows.entries()) {
       marker.content = index === cursor ? '›' : ' ';
-      row.backgroundColor = index === cursor ? theme.selectionBackground : 'transparent';
+      row.backgroundColor = index === cursor ? theme.chatSelectionBackground : 'transparent';
       label.fg = index === cursor ? theme.selectionForeground : theme.foreground;
       marker.fg = index === cursor ? theme.selectionForeground : green;
+      label.attributes = index === cursor ? TextAttributes.BOLD : 0;
+      marker.attributes = index === cursor ? TextAttributes.BOLD : 0;
     }
   };
   const paintLinks = () => {

@@ -12,14 +12,17 @@ test('theme retains terminal defaults and ANSI slots rather than fixed RGB color
   assert.equal(theme.background.intent, 'default');
   assert.equal(theme.accent.intent, 'indexed');
   assert.equal(theme.accent.slot, 2);
-  assert.equal(theme.selectionBackground.slot, 7);
+  assert.equal(theme.border.intent, 'indexed');
+  assert.equal(theme.border.slot, 0);
+  assert.equal(theme.selectionBackground.slot, 4);
   assert.equal(theme.selectionForeground.slot, 0);
+  assert.equal(theme.chatSelectionBackground.slot, 4);
   assert.equal(theme.messageSelectionBackground.slot, 4);
   assert.deepEqual(
     theme.replyPalette.map(([background, foreground]) => [background.slot, foreground.slot]),
     [
-      [7, 15],
-      [8, 15],
+      [0, 7],
+      [8, 7],
     ],
   );
   for (const pair of theme.replyPalette) {
@@ -31,6 +34,7 @@ test('theme retains terminal defaults and ANSI slots rather than fixed RGB color
 });
 
 test('UI keeps terminal color intent through focus, selections, overlays and reply threads', async (t) => {
+  const { TextAttributes } = await import('@opentui/core');
   const { createTestRenderer } = await import('@opentui/core/testing');
   const setup = await createTestRenderer({ width: 100, height: 30, kittyKeyboard: true });
   const backend = new EventEmitter();
@@ -48,7 +52,10 @@ test('UI keeps terminal color intent through focus, selections, overlays and rep
     selection: 1,
     status: 'ready',
     draft: 'draft',
-    chats: [{ id: 'chat', name: 'Chat', group: true }],
+    chats: [
+      { id: 'chat', name: 'Chat', group: true },
+      { id: 'other', name: 'Other' },
+    ],
     messages: [
       { id: '1', text: 'Original' },
       { id: '2', text: 'Reply', replyTo: '1' },
@@ -57,6 +64,14 @@ test('UI keeps terminal color intent through focus, selections, overlays and rep
   };
   backend.emit('state', state);
   await setup.renderOnce();
+  assert.equal(node('line-history').parent.borderColor.slot, 0);
+  const selectedChat = node('line-chat-0');
+  assert.equal(selectedChat.backgroundColor.intent, 'indexed');
+  assert.equal(selectedChat.backgroundColor.slot, 4);
+  for (const child of selectedChat.getChildren()) {
+    assert.equal(child.fg.slot, 0);
+    assert.equal(child.attributes, TextAttributes.BOLD);
+  }
   for (const id of ['line-expanded-view', 'line-video-view', 'line-sticker-picker']) {
     assert.equal(node(id).backgroundColor.intent, 'default');
   }
@@ -65,20 +80,26 @@ test('UI keeps terminal color intent through focus, selections, overlays and rep
   assert.equal(node('line-message-marker-2').fg.slot, 2);
   assert.equal(node('line-message-0').backgroundColor.intent, 'indexed');
   assert.deepEqual(node('line-message-0').backgroundColor, node('line-message-1').backgroundColor);
-  assert.equal(text(0).fg.slot, 15);
+  assert.equal(text(0).fg.slot, 7);
   setup.mockInput.pressEnter();
+  assert.equal(node('line-history').parent.borderColor.slot, 2);
   assert.equal(node('line-message-2').backgroundColor.slot, 4);
   assert.equal(text(2).fg.slot, 0);
+  assert.equal(text(2).attributes, TextAttributes.BOLD);
   setup.mockInput.pressKey('i');
   assert.equal(app.input.textColor.intent, 'default');
   assert.equal(app.input.backgroundColor.intent, 'default');
   assert.equal(text(2).fg.intent, 'default');
+  assert.equal(text(2).attributes, 0);
   assert.equal(node('line-file-paths').textColor.intent, 'default');
   assert.equal(node('line-mention-picker').fg.slot, 0);
-  assert.equal(node('line-mention-picker').bg.slot, 7);
+  assert.equal(node('line-mention-picker').bg.slot, 4);
   const history = node('line-history');
   assert.equal(history.verticalScrollBar.slider.backgroundColor.intent, 'default');
-  assert.equal(history.verticalScrollBar.slider.foregroundColor.slot, 8);
+  assert.equal(history.verticalScrollBar.slider.foregroundColor.slot, 0);
+  assert.equal(history.horizontalScrollBar.slider.foregroundColor.slot, 0);
+  assert.equal(history.verticalScrollBar.startArrow.foregroundColor.slot, 0);
+  assert.equal(history.verticalScrollBar.endArrow.foregroundColor.slot, 0);
   backend.emit('state', {
     ...state,
     messages: [
@@ -92,12 +113,19 @@ test('UI keeps terminal color intent through focus, selections, overlays and rep
   });
   assert.deepEqual(
     [0, 3, 5].map((index) => node(`line-message-${index}`).backgroundColor.slot),
-    [7, 8, 7],
+    [0, 8, 0],
   );
-  assert.equal(node('line-message-7').backgroundColor.slot, 7);
-  assert.equal(text(7).fg.slot, 15);
+  assert.equal(node('line-message-7').backgroundColor.slot, 0);
+  assert.equal(text(7).fg.slot, 7);
   setup.mockInput.pressEscape();
   setup.mockInput.pressKey('G');
-  assert.equal(node('line-message-7').backgroundColor.slot, 7);
-  assert.equal(text(7).fg.slot, 15);
+  assert.equal(node('line-message-7').backgroundColor.slot, 0);
+  assert.equal(text(7).fg.slot, 7);
+  setup.mockInput.pressKey('h');
+  setup.mockInput.pressKey('j');
+  for (const child of node('line-chat-0').getChildren()) assert.equal(child.attributes, 0);
+  for (const child of node('line-chat-1').getChildren()) {
+    assert.equal(child.fg.slot, 0);
+    assert.equal(child.attributes, TextAttributes.BOLD);
+  }
 });
