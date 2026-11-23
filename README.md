@@ -1,8 +1,9 @@
 # tuiline — LINE in terminal
 
-> This is an AI generated application and will not be actively maintained. It is intended to have minimal usability without spending much of my time, as a result of being forced to use it by workplace culture.
+> This is an AI generated application and will not be actively maintained. It is intended to have minimal usability without spending much of my time, as a result of me being forced to use it by workplace culture.
 
 Original repo from [tuigram](https://github.com/leonid-shutov/tuigram)
+
 ![tuiline showing LINE chats and the sticker picker](screenshot-tuiline.png)
 
 An OpenTUI client for LINE Messenger with its Go backend included in
