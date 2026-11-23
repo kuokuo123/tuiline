@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -17,7 +18,58 @@ import (
 const historyFileLimit = 64 << 20
 const historyBudget = 512 << 20
 
-type historyCache struct{ dir string }
+type historyCache struct {
+	dir     string
+	mu      sync.Mutex
+	diskMu  sync.Mutex
+	hot     map[string]*historyEntry
+	pending map[string]*historyEntry
+	running bool
+	tick    uint64
+}
+
+type historyEntry struct {
+	account, chat string
+	rows          []Message
+	info          os.FileInfo
+	touched       uint64
+	dirty         bool
+}
+
+func cloneHistory(rows []Message) []Message {
+	out := append([]Message(nil), rows...)
+	for i := range out {
+		out[i].Reactions = append([]Reaction(nil), rows[i].Reactions...)
+		if rows[i].Sticker != nil {
+			sticker := *rows[i].Sticker
+			out[i].Sticker = &sticker
+		}
+		if rows[i].Encrypted != nil {
+			encrypted := *rows[i].Encrypted
+			out[i].Encrypted = &encrypted
+		}
+	}
+	return out
+}
+
+// Keep a small LRU of active chats, not an unbounded mirror of the disk cache.
+func (c *historyCache) rememberLocked(entry *historyEntry) {
+	if c.hot == nil {
+		c.hot = map[string]*historyEntry{}
+	}
+	c.tick++
+	entry.touched = c.tick
+	c.hot[entry.chat] = entry
+	for len(c.hot) > 8 {
+		var oldest *historyEntry
+		for _, candidate := range c.hot {
+			if oldest == nil || candidate.touched < oldest.touched {
+				oldest = candidate
+			}
+		}
+		delete(c.hot, oldest.chat)
+	}
+}
 
 type historyDocument struct {
 	Version  int       `json:"version"`
@@ -70,7 +122,25 @@ func (c *historyCache) load(account, chat string) []Message {
 	}
 	file := c.path(chat)
 	info, err := os.Lstat(file)
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > historyFileLimit {
+	if err != nil && !errors.Is(err, os.ErrNotExist) ||
+		err == nil && (!info.Mode().IsRegular() || info.Mode().Perm() != 0600 || info.Size() > historyFileLimit) {
+		return nil
+	}
+	c.mu.Lock()
+	entry := c.pending[chat]
+	if entry == nil {
+		entry = c.hot[chat]
+	}
+	if entry != nil && entry.account == account && (entry.dirty ||
+		entry.info != nil && info != nil && os.SameFile(entry.info, info) &&
+			entry.info.Size() == info.Size() && entry.info.ModTime().Equal(info.ModTime())) {
+		c.rememberLocked(entry)
+		rows := cloneHistory(entry.rows)
+		c.mu.Unlock()
+		return rows
+	}
+	c.mu.Unlock()
+	if err != nil {
 		return nil
 	}
 	data, err := os.ReadFile(file)
@@ -88,6 +158,9 @@ func (c *historyCache) load(account, chat string) []Message {
 		}
 		seen[m.ID] = true
 	}
+	c.mu.Lock()
+	c.rememberLocked(&historyEntry{account: account, chat: chat, rows: cloneHistory(doc.Messages), info: info})
+	c.mu.Unlock()
 	return doc.Messages
 }
 
@@ -144,20 +217,80 @@ func reconcileHistory(cached, fresh, concurrent []Message) []Message {
 }
 
 func (c *historyCache) save(account, chat string, rows []Message) {
-	if c == nil || !fullID.MatchString(account) || !fullID.MatchString(chat) {
+	if c == nil {
 		return
+	}
+	c.enqueue(account, chat, rows)
+	c.flushPending()
+}
+
+func (c *historyCache) enqueue(account, chat string, rows []Message) bool {
+	if c == nil || !fullID.MatchString(account) || !fullID.MatchString(chat) {
+		return false
+	}
+	entry := &historyEntry{account: account, chat: chat, rows: cloneHistory(rows), dirty: true}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.pending == nil {
+		c.pending = map[string]*historyEntry{}
+	}
+	c.pending[chat] = entry
+	c.rememberLocked(entry)
+	if c.running {
+		return false
+	}
+	c.running = true
+	return true
+}
+
+// One ordered writer coalesces repeated snapshots of the same chat. No engine
+// mutex is held during encoding, fsync, rename or pruning. Engine.Wait/Close
+// drain this worker, so normal shutdown retains the existing durable snapshots.
+func (c *historyCache) flushPending() {
+	c.diskMu.Lock()
+	defer c.diskMu.Unlock()
+	for {
+		c.mu.Lock()
+		var entry *historyEntry
+		for _, candidate := range c.pending {
+			entry = candidate
+			break
+		}
+		if entry == nil {
+			c.running = false
+			c.mu.Unlock()
+			return
+		}
+		c.mu.Unlock()
+		saved := c.saveDisk(entry.account, entry.chat, entry.rows)
+		info, _ := os.Lstat(c.path(entry.chat))
+		c.mu.Lock()
+		entry.dirty, entry.info = false, info
+		if !saved && c.hot[entry.chat] == entry {
+			delete(c.hot, entry.chat)
+		}
+		if c.pending[entry.chat] == entry {
+			delete(c.pending, entry.chat)
+		}
+		c.mu.Unlock()
+	}
+}
+
+func (c *historyCache) saveDisk(account, chat string, rows []Message) bool {
+	if c == nil || !fullID.MatchString(account) || !fullID.MatchString(chat) {
+		return false
 	}
 	data, err := json.Marshal(historyDocument{Version: 1, Account: account, Chat: chat, Messages: rows})
 	if err != nil || len(data) > historyFileLimit {
-		return
+		return false
 	}
 	// Refuse to replace an unsafe pre-existing entry.
 	if info, err := os.Lstat(c.path(chat)); err == nil && (!info.Mode().IsRegular() || info.Mode().Perm() != 0600) {
-		return
+		return false
 	}
 	tmp, err := os.CreateTemp(c.dir, ".history-*")
 	if err != nil {
-		return
+		return false
 	}
 	defer os.Remove(tmp.Name())
 	if tmp.Chmod(0600) != nil || func() error {
@@ -170,11 +303,13 @@ func (c *historyCache) save(account, chat string, rows []Message) {
 		return tmp.Close()
 	}() != nil {
 		tmp.Close()
-		return
+		return false
 	}
 	if os.Rename(tmp.Name(), c.path(chat)) == nil {
 		c.prune()
+		return true
 	}
+	return false
 }
 
 func (c *historyCache) prune() {
@@ -213,7 +348,10 @@ func (c *historyCache) prune() {
 
 func (e *Engine) cacheHistory(chat string, rows []Message) {
 	if e.state.Mode == "live" && e.historyStore != nil {
-		e.historyStore.save(e.state.Account.ID, chat, rows)
+		store := e.historyStore
+		if store.enqueue(e.state.Account.ID, chat, rows) {
+			e.spawn(store.flushPending)
+		}
 	}
 }
 
@@ -238,7 +376,14 @@ func upsertHistory(rows []Message, item Message) []Message {
 			return rows
 		}
 	}
-	return sortedHistory(append(rows, item))
+	at := sort.Search(len(rows), func(i int) bool {
+		return rows[i].Timestamp > item.Timestamp ||
+			rows[i].Timestamp == item.Timestamp && rows[i].ID >= item.ID
+	})
+	rows = append(rows, Message{})
+	copy(rows[at+1:], rows[at:])
+	rows[at] = item
+	return rows
 }
 
 func removeHistory(rows []Message, id string) []Message {

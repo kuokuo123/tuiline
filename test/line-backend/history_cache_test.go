@@ -135,3 +135,76 @@ func TestHistoryCacheLiveUpdatesAndUnsend(t *testing.T) {
 	}
 	e.Close()
 }
+
+func TestHistoryQueuedWritesAndOwnedSnapshots(t *testing.T) {
+	account, chat := "u"+strings.Repeat("a", 43), "c"+strings.Repeat("c", 43)
+	cache := openHistoryCache(filepath.Join(t.TempDir(), "tuiline", "history"), account)
+	cache.enqueue(account, chat, []Message{{ID: "1", Text: "first"}})
+	rows := []Message{{ID: "1", Text: "latest", Reactions: []Reaction{{Name: "love", Count: 1}}}}
+	cache.enqueue(account, chat, rows)
+	rows[0].Text = "mutated"
+	rows[0].Reactions[0].Count = 999
+	got := cache.load(account, chat)
+	if got[0].Text != "latest" || got[0].Reactions[0].Count != 1 {
+		t.Fatal("queue retained mutable caller data")
+	}
+	got[0].Text = "reader edit"
+	if cache.load(account, chat)[0].Text != "latest" {
+		t.Fatal("reader changed shared cache")
+	}
+	if len(cache.pending) != 1 {
+		t.Fatal("same-chat snapshots were not coalesced")
+	}
+	cache.flushPending()
+	if got := openHistoryCache(filepath.Dir(cache.dir), account).load(account, chat); len(got) != 1 || got[0].Text != "latest" {
+		t.Fatal("queued history did not survive reopening")
+	}
+}
+
+func TestHistoryWriterDoesNotHoldEngineMutex(t *testing.T) {
+	account, chat := "u"+strings.Repeat("a", 43), "c"+strings.Repeat("c", 43)
+	cache := openHistoryCache(filepath.Join(t.TempDir(), "tuiline", "history"), account)
+	e := NewEngine(Operations{}, nil)
+	cache.diskMu.Lock()
+	e.mu.Lock()
+	e.state.Account.ID = account
+	e.historyStore = cache
+	e.cacheHistory(chat, []Message{{ID: "1", Text: "pending disk"}})
+	e.mu.Unlock()
+	// View must remain available while the disk writer is deliberately stalled.
+	if e.View().Account.ID != account {
+		t.Error("engine became unavailable")
+	}
+	cache.diskMu.Unlock()
+	e.Close()
+	if got := openHistoryCache(filepath.Dir(cache.dir), account).load(account, chat); len(got) != 1 {
+		t.Fatal("Close did not drain pending history")
+	}
+}
+
+func BenchmarkHistoryLoad(b *testing.B) {
+	account, chat := "u"+strings.Repeat("a", 43), "c"+strings.Repeat("c", 43)
+	cache := openHistoryCache(filepath.Join(b.TempDir(), "tuiline", "history"), account)
+	rows := make([]Message, 2000)
+	for i := range rows {
+		rows[i] = Message{ID: strconv.Itoa(i + 1), Timestamp: int64(i), Text: strings.Repeat("history ", 20)}
+	}
+	cache.save(account, chat, rows)
+	for _, hot := range []bool{false, true} {
+		name := "disk"
+		if hot {
+			name = "hot"
+		}
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				if !hot {
+					cache.mu.Lock()
+					cache.hot = nil
+					cache.mu.Unlock()
+				}
+				cache.load(account, chat)
+			}
+		})
+	}
+}

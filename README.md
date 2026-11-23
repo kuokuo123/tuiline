@@ -94,6 +94,10 @@ terminal grows again, without discarding its draft. Shift+Enter needs
 a terminal that reports it distinctly from Enter. Drafts, replies, and group
 mentions retain their line breaks. Ctrl+Z undoes edits; Ctrl+Shift+Z redoes them.
 
+History-cache updates use an ordered background writer and are drained on normal
+shutdown. Abrupt process termination can lose queued cache updates; LINE remains
+the source of truth. Credential and request-sequence persistence is unchanged.
+
 Upload progress, completion notices, and other status messages appear alongside
 `已連線` on the same status row. Only an active reply uses a separate reply banner.
 
