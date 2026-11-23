@@ -9,6 +9,7 @@ const { createLoginLog } = require('./login-log');
 const { terminalTheme } = require('./theme');
 const { pickFiles, parsePaths, uploadFiles, downloadFile } = require('./files');
 const { loadHintsVisible, saveHintsVisible } = require('./preferences');
+const { createComposer } = require('./composer');
 
 // Remote strings are plain text; strip terminal control bytes before display.
 // eslint-disable-next-line no-control-regex
@@ -116,10 +117,8 @@ async function createApp(
   };
   const loginImage = new Image(renderer, { width: 40, height: 20, visible: false, protocol: 'auto' });
   const loginText = new Text(renderer, { content: '', fg: green, visible: false });
-  const input = new Input(renderer, {
-    height: 1,
+  const input = await createComposer(renderer, {
     width: '100%',
-    maxLength: 10000,
     placeholder: 'i to insert · Esc to scroll',
     textColor: theme.foreground,
     focusedTextColor: theme.foreground,
@@ -304,6 +303,7 @@ async function createApp(
         ' COMPOSING',
         ' i                       Insert mode',
         ' Enter (insert)          Send text',
+        ' Shift+Enter (insert)    Insert a newline (enhanced keyboard)',
         ' Escape (insert)         Return to scroll mode',
         ' r (scroll)              Reply to selected message',
         ' @ (insert)              Search group mentions',
@@ -371,6 +371,29 @@ async function createApp(
   let transferNote = '';
   let pathPrompt;
   let disposed = false;
+  const statusLine = (text) => clean(text).replace(/\s*\n\s*/g, ' · ');
+  const paintStatus = () => {
+    const replyText = statusLine(view.reply?.text || '[Attachment]');
+    const replyHint = view.reply
+      ? `Reply to ${statusLine(view.reply.sender)}: ${replyText} · Esc in scroll mode cancels\n`
+      : '';
+    status.height = view.reply ? 2 : 1;
+    const parts = [
+      failed ? '後端已中斷連線' : view.statusText,
+      view.notificationNote,
+      view.readNote,
+      view.sendNote || view.historyNote,
+      transferNote,
+      view.sendStatus === 'pending' ? 'Sending…' : '',
+    ]
+      .filter(Boolean)
+      .map(statusLine);
+    status.content = ` ${replyHint}${[...new Set(parts)].join(' · ')}`;
+  };
+  const showNote = (note) => {
+    transferNote = statusLine(note);
+    paintStatus();
+  };
   const helpKey = (key, name) => !key.ctrl && !key.meta && (name === '?' || (name === '/' && key.shift));
   const safeImage = (source) =>
     typeof source === 'string' &&
@@ -438,7 +461,7 @@ async function createApp(
     const help = {
       chats: 'CHATS · j/k move · Enter open',
       history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k move · i insert`,
-      insert: 'INSERT · Enter send · Esc scroll',
+      insert: 'INSERT · Enter send · Shift+Enter newline · Esc scroll',
     };
     const shortHelp = {
       chats: 'CHATS · j/k · Enter',
@@ -466,8 +489,7 @@ async function createApp(
       fileInput.visible = true;
       input.blur();
       fileInput.focus();
-      transferNote = 'Yazi unavailable. Enter paths separated by spaces; quote paths containing spaces.';
-      status.content = transferNote;
+      showNote('Yazi unavailable. Enter paths separated by spaces; quote paths containing spaces.');
     });
   const closePaths = (files) => {
     const resolve = pathPrompt;
@@ -482,7 +504,7 @@ async function createApp(
     try {
       closePaths(parsePaths(fileInput.value));
     } catch (error) {
-      status.content = clean(error.message);
+      showNote(error.message);
     }
   });
   const startTransfer = async (upload, image = false) => {
@@ -499,7 +521,7 @@ async function createApp(
     }
     const selected = messageRows[messageCursor]?.message;
     if (!upload && (mode !== 'history' || !selected?.downloadable)) {
-      status.content = ' Select a downloadable file, image, video, or audio message in scroll mode.';
+      showNote('Select a downloadable file, image, video, or audio message in scroll mode.');
       return;
     }
     flushDraft();
@@ -517,8 +539,7 @@ async function createApp(
     previewTarget = '';
     const progress = (note) => {
       if (disposed) return;
-      transferNote = note;
-      status.content = clean(note);
+      showNote(note);
     };
     try {
       if (upload) {
@@ -646,7 +667,7 @@ async function createApp(
   };
   const launchLink = (url) => {
     openLink(url, (message) => {
-      status.content = clean(message);
+      showNote(message);
     });
     linkChoices = [];
     paintLinks();
@@ -965,20 +986,7 @@ async function createApp(
     const loginControls = login.stage === 'uncertain' ? 'Ctrl+R 檢查已儲存的登入狀態' : 'Ctrl+X cancel · Ctrl+L retry';
     // eslint-disable-next-line max-len
     loginText.content = `${clean(login.statusText)}${login.pin ? `\nPIN: ${clean(login.pin)}` : ''}${login.canConfirm ? '\nCtrl+Y to confirm' : ''}\n${loginControls}`;
-    status.height = view.reply ? 2 : 1;
-    const replyText = clean(view.reply?.text || '[Attachment]').replace(/\n/g, ' ');
-    const replyHint = view.reply
-      ? `Reply to ${clean(view.reply.sender)}: ${replyText} · Esc in scroll mode cancels\n`
-      : '';
-    const statusText = clean(view.statusText).replace(/\s*\n\s*/g, ' · ');
-    const note = [view.notificationNote, view.readNote, view.sendNote || view.historyNote]
-      .filter(Boolean)
-      .map((text) => clean(text).replace(/\s*\n\s*/g, ' · '))
-      .join(' · ');
-    status.content = ` ${replyHint}${[statusText, note, view.sendStatus === 'pending' ? 'Sending…' : '']
-      .filter(Boolean)
-      .join(' · ')}`;
-    if (transferNote) status.content = clean(transferNote);
+    paintStatus();
   };
   backend.on('state', onState);
   backend.on('failure', (message) => {
@@ -989,7 +997,7 @@ async function createApp(
     stickerPicker.dismiss();
     mentionPicker.close();
     closeExpanded(false);
-    status.content = clean(message);
+    showNote(message);
     imageCache.clear();
     for (const { image } of messageRows) {
       image.source = undefined;
@@ -1097,7 +1105,7 @@ async function createApp(
       hints.visible = !hints.visible;
       hints.height = hints.visible ? 1 : 0;
       if (!saveHintsVisible(hints.visible, hintsFile)) {
-        status.content = ' Could not save hints preference';
+        showNote('Could not save hints preference');
       }
       return;
     }
@@ -1145,7 +1153,10 @@ async function createApp(
       }
       return;
     }
-    if (!transferController) transferNote = '';
+    if (!transferController) {
+      transferNote = '';
+      paintStatus();
+    }
     if (
       key.ctrl &&
       ['s', 't', 'i'].includes(name) &&
@@ -1161,21 +1172,23 @@ async function createApp(
     if (key.ctrl && name.toLowerCase() === 'l') {
       key.preventDefault?.();
       if (failed) {
-        status.content = ' 後端已中斷連線，請重新啟動 npm run dev 後登入。';
+        showNote('後端已中斷連線，請重新啟動 npm run dev 後登入。');
         return;
       }
       if (view.mode === 'demo') {
-        status.content = ' 示範模式不支援登入，請使用 npm run dev 啟動正式模式。';
+        showNote('示範模式不支援登入，請使用 npm run dev 啟動正式模式。');
         return;
       }
       if (view.login?.active) {
-        status.content = view.login.canConfirm
-          ? ' 請按 Ctrl+Y 確認登入，或 Ctrl+X 取消。'
-          : ' 登入正在進行中，請依畫面指示操作，或按 Ctrl+X 取消。';
+        showNote(
+          view.login.canConfirm
+            ? ' 請按 Ctrl+Y 確認登入，或 Ctrl+X 取消。'
+            : ' 登入正在進行中，請依畫面指示操作，或按 Ctrl+X 取消。',
+        );
         return;
       }
       if (view.busy || view.sendStatus === 'pending') {
-        status.content = ' 目前正在連線或處理傳送結果，請稍候再按 Ctrl+L。';
+        showNote('目前正在連線或處理傳送結果，請稍候再按 Ctrl+L。');
         return;
       }
       videoController?.abort();
@@ -1356,12 +1369,12 @@ async function createApp(
     if (name === 'l' && mode === 'history' && selectedMessage?.message.contentType === 2) {
       key.preventDefault?.();
       if (!selectedMessage.message.downloadable || failed || view.busy || view.status !== 'ready') {
-        status.content = ' This video is not available for playback';
+        showNote('This video is not available for playback');
         return;
       }
       flushDraft();
       videoController = new AbortController();
-      status.content = ' Downloading video… · Esc cancel';
+      showNote('Downloading video… · Esc cancel');
       videoView.visible = true;
       videoLoading.visible = true;
       videoImage.visible = false;
@@ -1392,10 +1405,10 @@ async function createApp(
         },
       })
         .then(() => {
-          status.content = ' Video playback finished';
+          showNote('Video playback finished');
         })
         .catch((error) => {
-          status.content = error.name === 'AbortError' ? ' Video playback canceled' : ` ${clean(error.message)}`;
+          showNote(error.name === 'AbortError' ? 'Video playback canceled' : error.message);
         })
         .finally(() => {
           videoController = undefined;

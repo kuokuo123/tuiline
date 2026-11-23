@@ -75,6 +75,7 @@ test('LINE Ctrl+I selects photo upload while Tab keeps pane navigation', async (
   const state = {
     mode: 'demo',
     status: 'ready',
+    statusText: '已連線',
     selectedId: 'alice',
     session: 'demo',
     selection: 1,
@@ -122,6 +123,10 @@ test('LINE Ctrl+I selects photo upload while Tab keeps pane navigation', async (
   assert.equal(picks, 1);
   assert.equal(commands.find((command) => command.action === 'attach').mode, 'image');
   assert.ok(commands.some((command) => command.action === 'send'));
+  await setup.renderOnce();
+  const status = setup.renderer.root.findDescendantById('line-status');
+  assert.equal(status.height, 1);
+  assert.match(setup.captureCharFrame().split('\n')[status.y], /已連線.*Uploaded 1 file/);
   setup.mockInput.pressKey('i', { ctrl: true });
   await new Promise((resolve) => {
     backend.once('state', resolve);

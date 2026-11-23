@@ -62,6 +62,7 @@ does not publish one. The source-build instructions above work without npm publi
 | l on an image or sticker | Fit full height; l again fills width; j/k scroll                |
 | l on a video             | Play inside the right pane; h, q, or Escape returns             |
 | Enter in insert mode     | Send text                                                       |
+| Shift+Enter in insert    | Insert a newline (enhanced keyboard support required)           |
 | Escape                   | Return to scroll mode, preserving your draft                    |
 | Ctrl+F / Ctrl+B          | Move a full page down / up in scroll mode                       |
 | Ctrl+D / Ctrl+U          | Move half a page down / up in scroll mode                       |
@@ -85,6 +86,14 @@ does not publish one. The source-build instructions above work without npm publi
 | Ctrl+Y                   | Confirm login when requested                                    |
 | Ctrl+X                   | Cancel login                                                    |
 | Ctrl+C                   | Quit                                                            |
+
+The composer supports multiline editing and pasted text. It grows up to five
+rows, then scrolls internally; Enter sends the complete draft. Shift+Enter needs
+a terminal that reports it distinctly from Enter. Drafts, replies, and group
+mentions retain their line breaks. Ctrl+Z undoes edits; Ctrl+Shift+Z redoes them.
+
+Upload progress, completion notices, and other status messages appear alongside
+`已連線` on the same status row. Only an active reply uses a separate reply banner.
 
 File transfers support up to **20 MiB per file**. Ctrl+S saves the selected file,
 image, video, or audio attachment directly to your system Downloads folder (XDG),

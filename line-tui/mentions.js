@@ -78,12 +78,14 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     }
     if (mentions.length && !['ready', 'error'].includes(getView().membersStatus)) request();
     // The editor uses display columns; LINE ranges use UTF-16 string offsets.
-    let offset = 0;
+    const lines = input.value.split('\n');
+    const { row, col } = input.logicalCursor;
+    let offset = lines.slice(0, row).reduce((length, line) => length + line.length + 1, 0);
     let columns = 0;
-    const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(input.value);
+    const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(lines[row] || '');
     for (const { segment } of segments) {
       columns += stringWidth(segment);
-      if (columns > input.cursorOffset) break;
+      if (columns > col) break;
       offset += segment.length;
     }
     const prefix = input.value.slice(0, offset);
@@ -135,7 +137,8 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     const adjusted = editMentions(text, next, mentions);
     close();
     input.value = next;
-    input.cursorOffset = stringWidth(next.slice(0, start + label.length + 1));
+    const beforeCursor = next.slice(0, start + label.length + 1).split('\n');
+    input.setCursor(beforeCursor.length - 1, stringWidth(beforeCursor.at(-1)));
     text = next;
     mentions = [...adjusted, { id: member.id, start, end: start + label.length }].sort((a, b) => a.start - b.start);
     paint();
@@ -159,6 +162,10 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
         return true;
       }
       if (key.ctrl || key.meta) return false;
+      if (key.shift && ['return', 'kpenter', 'linefeed'].includes(key.name)) {
+        close();
+        return false;
+      }
       if (['up', 'down'].includes(key.name)) {
         cursor = Math.max(0, Math.min(candidates.length - 1, cursor + (key.name === 'down' ? 1 : -1)));
         paint();
