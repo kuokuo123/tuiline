@@ -101,6 +101,13 @@ func TestFileSendEnvelopeAndUploadOrdering(t *testing.T) {
 				if err != nil || !bytes.Equal(data, attachment.Data) {
 					t.Fatal("uploaded file does not decrypt", err)
 				}
+				wire, err := json.Marshal(f.sent)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if f.sent.ContentMetadata["ENC_KM"] != "" || bytes.Contains(wire, []byte(payload["keyMaterial"])) {
+					t.Fatal("raw attachment key exposed outside encrypted message chunks")
+				}
 				encoded, _ := json.Marshal(result)
 				if strings.Contains(string(encoded), payload["keyMaterial"]) {
 					t.Fatal("file key exposed in send result")

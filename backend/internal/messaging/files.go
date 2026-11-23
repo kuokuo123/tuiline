@@ -137,7 +137,9 @@ func (c *Client) uploadFile(file *Attachment, metadata map[string]string) ([]byt
 	if oid == "" {
 		return nil, errors.New("file upload returned no object ID")
 	}
-	metadata["OID"], metadata["SID"], metadata["ENC_KM"] = oid, "emf", key
+	// Only storage coordinates belong in clear message metadata. The raw file
+	// key must travel exclusively inside the Letter Sealing payload.
+	metadata["OID"], metadata["SID"] = oid, "emf"
 	return json.Marshal(map[string]string{"keyMaterial": key, "fileName": file.Name})
 }
 
