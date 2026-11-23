@@ -122,3 +122,43 @@ test('mentions use UTF-16 ranges after Chinese and emoji text; private chats kee
   setup.mockInput.pressEnter();
   assert.equal(commands.at(-1).mentions, undefined);
 });
+
+for (const prefix of ['\t', 'A\t', '第一行😀\n你好\t']) {
+  test(`mention insertion respects tab-expanded cursor columns: ${JSON.stringify(prefix)}`, async (t) => {
+    const { createTestRenderer } = await import('@opentui/core/testing');
+    const setup = await createTestRenderer({ width: 110, height: 30, kittyKeyboard: true });
+    const backend = new EventEmitter();
+    const commands = [];
+    backend.command = (command) => commands.push(command);
+    backend.close = () => {};
+    const app = await createApp(setup.renderer, backend);
+    t.after(() => {
+      app.dispose();
+      setup.renderer.destroy();
+    });
+    backend.emit('state', {
+      chats: [{ id: 'group', name: 'Group', group: true }],
+      messages: [],
+      draft: '',
+      selectedId: 'group',
+      session: 'test',
+      selection: 1,
+      status: 'ready',
+      membersStatus: 'ready',
+      members: [{ id: 'u-alice', name: 'Alice' }],
+    });
+    setup.mockInput.pressKey('i');
+    app.input.editBuffer.setTabWidth(4);
+    app.input.value = `${prefix}@Al tail`;
+    const { row, col } = app.input.logicalCursor;
+    app.input.setCursor(row, col - 5);
+    await setup.renderOnce();
+    assert.equal(setup.renderer.root.findDescendantById('line-mention-picker').visible, true);
+    setup.mockInput.pressEnter();
+    await setup.mockInput.typeText('hello');
+    assert.equal(app.input.value, `${prefix}@Alice hello tail`);
+    setup.mockInput.pressEnter();
+    const sent = commands.findLast((command) => command.action === 'send');
+    assert.deepEqual(sent.mentions, [{ id: 'u-alice', start: prefix.length, end: prefix.length + 6 }]);
+  });
+}

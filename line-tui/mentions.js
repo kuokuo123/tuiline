@@ -78,16 +78,8 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     }
     if (mentions.length && !['ready', 'error'].includes(getView().membersStatus)) request();
     // The editor uses display columns; LINE ranges use UTF-16 string offsets.
-    const lines = input.value.split('\n');
     const { row, col } = input.logicalCursor;
-    let offset = lines.slice(0, row).reduce((length, line) => length + line.length + 1, 0);
-    let columns = 0;
-    const segments = new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(lines[row] || '');
-    for (const { segment } of segments) {
-      columns += stringWidth(segment);
-      if (columns > col) break;
-      offset += segment.length;
-    }
+    const offset = input.getTextRangeByCoords(0, 0, row, col).length;
     const prefix = input.value.slice(0, offset);
     const match = /(?:^|\s)@([^\s@]*)$/u.exec(prefix);
     if (!match || mentions.some((mention) => offset > mention.start && offset <= mention.end)) {
@@ -138,7 +130,10 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     close();
     input.value = next;
     const beforeCursor = next.slice(0, start + label.length + 1).split('\n');
-    input.setCursor(beforeCursor.length - 1, stringWidth(beforeCursor.at(-1)));
+    // OpenTUI gives each tab a configurable fixed cell width. stringWidth alone
+    // treats tabs as zero-width and would place the caret inside the mention.
+    const tab = ' '.repeat(input.editBuffer.getTabWidth());
+    input.setCursor(beforeCursor.length - 1, stringWidth(beforeCursor.at(-1).replaceAll('\t', tab)));
     text = next;
     mentions = [...adjusted, { id: member.id, start, end: start + label.length }].sort((a, b) => a.start - b.start);
     paint();
