@@ -3,12 +3,15 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const { randomBytes } = require('node:crypto');
 
-const hintsPath = () =>
-  path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'tuiline', 'hints-hidden');
-
-const legacyHintsPath = () =>
-  path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'tuiline', 'hints-hidden');
+const configDirectory = () => path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'tuiline');
+const cacheDirectory = () => path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'tuiline');
+const hintsPath = () => path.join(cacheDirectory(), 'settings.json');
+const legacyHintsPaths = () => [
+  path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache'), 'tuiline', 'hints-hidden'),
+  path.join(configDirectory(), 'hints-hidden'),
+];
 
 const privateDirectory = (directory, create) => {
   try {
@@ -20,64 +23,137 @@ const privateDirectory = (directory, create) => {
   }
 };
 
-function migrateHints(file) {
-  const legacy = legacyHintsPath();
-  if (legacy === file) return;
-  const directory = path.dirname(legacy);
-  if (!privateDirectory(directory, false)) return;
-  try {
-    const info = fs.lstatSync(legacy);
-    // Only remove the known preference. Never touch an unfamiliar or unsafe file.
-    if (!info.isFile() || (info.mode & 0o777) !== 0o600 || info.size !== 0) return;
-    if (!saveHintsVisible(false, file)) return;
-    fs.unlinkSync(legacy);
-  } catch (error) {
-    if (error.code !== 'ENOENT') return;
+function readSettings(file) {
+  if (!privateDirectory(path.dirname(file), false)) {
+    if (!fs.existsSync(path.dirname(file))) return { version: 1, preferences: {} };
+    throw new Error('Settings directory is not private');
   }
-  // Leave other user files in the legacy directory alone.
+  let info;
   try {
-    fs.rmdirSync(directory);
+    info = fs.lstatSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT') return { version: 1, preferences: {} };
+    throw error;
+  }
+  if (!info.isFile() || (info.mode & 0o777) !== 0o600 || info.size > 65536) {
+    throw new Error('Settings file is not private or exceeds its size limit');
+  }
+  const doc = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (doc?.version !== 1 || !doc.preferences || typeof doc.preferences !== 'object' || Array.isArray(doc.preferences)) {
+    throw new Error('Unsupported settings format');
+  }
+  return doc;
+}
+
+function writeSettings(file, doc) {
+  const directory = path.dirname(file);
+  if (!privateDirectory(directory, true)) return false;
+  const temporary = path.join(directory, `.settings-${randomBytes(12).toString('hex')}`);
+  let handle;
+  try {
+    const body = `${JSON.stringify(doc)}\n`;
+    if (Buffer.byteLength(body) > 65536) return false;
+    handle = fs.openSync(temporary, 'wx', 0o600);
+    fs.writeFileSync(handle, body);
+    fs.fsyncSync(handle);
+    fs.closeSync(handle);
+    handle = undefined;
+    fs.renameSync(temporary, file);
+    return true;
   } catch {
-    // Not empty, or another process still uses it.
+    return false;
+  } finally {
+    if (handle !== undefined) fs.closeSync(handle);
+    try {
+      fs.unlinkSync(temporary);
+    } catch {
+      // Rename already consumed the temporary file, or creation failed.
+    }
+  }
+}
+
+function legacyMarker(file) {
+  try {
+    if (!privateDirectory(path.dirname(file), false)) return false;
+    const info = fs.lstatSync(file);
+    return info.isFile() && (info.mode & 0o777) === 0o600 && info.size === 0;
+  } catch {
+    return false;
+  }
+}
+
+function removeLegacyMarkers() {
+  for (const file of legacyHintsPaths()) {
+    if (!legacyMarker(file)) continue;
+    try {
+      fs.unlinkSync(file);
+    } catch {
+      // Preferences are already saved; cleanup can be retried next launch.
+    }
+  }
+}
+
+function currentSettings(file, migrate) {
+  const doc = readSettings(file);
+  const source = path.join(configDirectory(), 'settings.json');
+  if (!migrate || source === file) return doc;
+  try {
+    // readSettings treats missing files as defaults; only migrate a real file.
+    fs.lstatSync(source);
+    const old = readSettings(source);
+    const merged = { ...old, ...doc, preferences: { ...old.preferences, ...doc.preferences } };
+    if (writeSettings(file, merged)) {
+      try {
+        fs.unlinkSync(source);
+      } catch {
+        // Retry cleanup next launch if the config directory is not writable.
+      }
+    }
+    return merged;
+  } catch {
+    // Leave unsafe/unsupported source files and unrelated config files alone.
+    return doc;
   }
 }
 
 function loadHintsVisible(file) {
-  if (file === undefined) {
-    file = hintsPath();
-    migrateHints(file);
-  }
+  const migrate = file === undefined;
+  file ??= hintsPath();
   try {
-    if (!privateDirectory(path.dirname(file), false)) return true;
-    const info = fs.lstatSync(file);
-    return !(info.isFile() && (info.mode & 0o777) === 0o600 && info.size === 0);
+    const doc = currentSettings(file, migrate);
+    if (typeof doc.preferences.hintsVisible === 'boolean') {
+      if (migrate) removeLegacyMarkers();
+      return doc.preferences.hintsVisible;
+    }
+    if (migrate && legacyHintsPaths().some(legacyMarker)) {
+      doc.preferences.hintsVisible = false;
+      if (writeSettings(file, doc)) removeLegacyMarkers();
+      return false;
+    }
   } catch {
-    return true;
+    // Do not overwrite unsafe, corrupt, or newer settings. Retain a legacy
+    // choice in memory if migration cannot be saved.
+    if (migrate) {
+      try {
+        const old = readSettings(path.join(configDirectory(), 'settings.json'));
+        if (typeof old.preferences.hintsVisible === 'boolean') return old.preferences.hintsVisible;
+      } catch {
+        // Ignore unsafe or unsupported legacy JSON.
+      }
+    }
+    if (migrate && legacyHintsPaths().some(legacyMarker)) return false;
   }
+  return true;
 }
 
-function saveHintsVisible(visible, file = hintsPath()) {
-  const directory = path.dirname(file);
-  if (!privateDirectory(directory, true)) return false;
+function saveHintsVisible(visible, file) {
+  const migrate = file === undefined;
+  file ??= hintsPath();
   try {
-    if (visible) {
-      try {
-        fs.unlinkSync(file);
-      } catch (error) {
-        if (error.code !== 'ENOENT') return false;
-      }
-      return true;
-    }
-    try {
-      const info = fs.lstatSync(file);
-      if (!info.isFile() || (info.mode & 0o777) !== 0o600) return false;
-      if (info.size !== 0) fs.truncateSync(file, 0);
-      return true;
-    } catch (error) {
-      if (error.code !== 'ENOENT') return false;
-    }
-    const handle = fs.openSync(file, 'wx', 0o600);
-    fs.closeSync(handle);
+    const doc = currentSettings(file, migrate);
+    doc.preferences.hintsVisible = visible;
+    if (!writeSettings(file, doc)) return false;
+    if (migrate) removeLegacyMarkers();
     return true;
   } catch {
     return false;

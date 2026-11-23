@@ -7,7 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"image"
 	"os"
 	"path/filepath"
@@ -23,15 +22,16 @@ const mediaEntryLimit = 3 << 20
 const mediaLifetime = 90 * 24 * time.Hour
 
 type mediaCache struct {
-	mu        sync.Mutex
-	dir       string
-	enabled   bool
-	budget    int64
-	version   uint64
-	index     map[string]cachedFile
-	bytes     int64
-	scannedAt time.Time
-	prunedAt  time.Time
+	preferences *preferenceStore
+	mu          sync.Mutex
+	dir         string
+	enabled     bool
+	budget      int64
+	version     uint64
+	index       map[string]cachedFile
+	bytes       int64
+	scannedAt   time.Time
+	prunedAt    time.Time
 }
 
 type mediaDocument struct {
@@ -63,13 +63,11 @@ func openMediaCache(root, account string) *mediaCache {
 	if privateDir(dir) != nil {
 		return nil
 	}
-	c := &mediaCache{dir: dir, enabled: true, budget: defaultMediaBudget}
+	c := &mediaCache{dir: dir, preferences: accountPreferences(account, dir), enabled: true, budget: defaultMediaBudget}
 	if configured, err := strconv.ParseInt(os.Getenv("TUILINE_MEDIA_CACHE_MB"), 10, 64); err == nil && configured >= 1 && configured <= 2048 {
 		c.budget = configured << 20
 	}
-	if info, err := os.Lstat(filepath.Join(dir, "disabled")); err == nil && info.Mode().IsRegular() && info.Mode().Perm() == 0600 {
-		c.enabled = false
-	}
+	c.enabled = c.preferences.enabled("disabled")
 	c.pruneLocked()
 	return c
 }
@@ -284,22 +282,8 @@ func (c *mediaCache) setEnabled(enabled bool) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	flag := filepath.Join(c.dir, "disabled")
-	if enabled {
-		if err := os.Remove(flag); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return false
-		}
-	} else {
-		if info, err := os.Lstat(flag); err == nil && (!info.Mode().IsRegular() || info.Mode().Perm() != 0600) {
-			return false
-		}
-		f, err := os.OpenFile(flag, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-		if err != nil {
-			return false
-		}
-		if err := f.Close(); err != nil {
-			return false
-		}
+	if !c.preferences.setEnabled("disabled", enabled) {
+		return false
 	}
 	c.enabled = enabled
 	return true
@@ -326,9 +310,7 @@ func (c *mediaCache) preferenceEnabled(flag string) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	path := filepath.Join(c.dir, flag)
-	info, err := os.Lstat(path)
-	return err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600
+	return c.preferences.enabled(flag)
 }
 
 func (c *mediaCache) setAutoImages(enabled bool) bool {
@@ -341,19 +323,7 @@ func (c *mediaCache) setPreferenceEnabled(flag string, enabled bool) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	path := filepath.Join(c.dir, flag)
-	if enabled {
-		err := os.Remove(path)
-		return err == nil || errors.Is(err, os.ErrNotExist)
-	}
-	if info, err := os.Lstat(path); err == nil && (!info.Mode().IsRegular() || info.Mode().Perm() != 0600) {
-		return false
-	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return false
-	}
-	return f.Close() == nil
+	return c.preferences.setEnabled(flag, enabled)
 }
 
 func (c *mediaCache) clear() {

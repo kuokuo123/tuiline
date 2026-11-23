@@ -53,6 +53,8 @@ func TestSnapshotReadsMuteStateForFriendsAndGroups(t *testing.T) {
 }
 
 func TestMarkReadTogglePersistsAndStopsReceipts(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	calls := 0
 	e, c := readTestEngine(t, func(context.Context, string, string) error { calls++; return nil })
 	root := filepath.Join(t.TempDir(), "tuiline", "media")

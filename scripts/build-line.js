@@ -51,6 +51,10 @@ try {
     '../line-tui/backend/media_cache.go',
   );
   const testing = process.argv.includes('--test');
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_preferences.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/preferences.go',
+  );
   replace[path.resolve(source, 'backend/internal/gui/tuiline_media_events.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/media_events.go',
@@ -96,6 +100,10 @@ try {
     '../line-tui/backend/gui_download_progress.go',
   );
   if (testing) {
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_preferences_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/preferences_test.go',
+    );
     replace[path.resolve(source, 'backend/internal/gui/tuiline_media_events_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/media_events_test.go',

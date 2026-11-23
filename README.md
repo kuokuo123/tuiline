@@ -192,10 +192,10 @@ Full-size PNG/JPEG previews (up to 2 MiB and 4096×4096) load only when opened.
 Sticker images supplied by the backend render inline automatically.
 The header also shows `cached on/off` and media-cache usage. Press `Ctrl+H`
 outside insert mode to reclaim the bottom hints row; the setting persists across
-restarts in `$XDG_CACHE_HOME/tuiline/hints-hidden` (normally
-`~/.cache/tuiline/hints-hidden`), independently of whether media caching is
-enabled. An existing private hint setting in `~/.config/tuiline/` is migrated
-automatically, and the old directory is removed if empty. Press `?`
+restarts in `$XDG_CACHE_HOME/tuiline/settings.json` (normally
+`~/.cache/tuiline/settings.json`), independently of whether media caching is
+enabled. Existing private `hints-hidden` markers in the cache or config directory
+are migrated automatically. Press `?`
 outside insert mode for the complete, scrollable keybind list. It supports
 `j`/`k`, arrow keys, PageUp/PageDown, and Ctrl+B/F/U/D; `?` or Escape closes it
 without changing the conversation selection or draft.
@@ -273,10 +273,25 @@ private directory (0700) and file (0600) permissions. The default limit is
 for 90 days expires. Set `TUILINE_MEDIA_CACHE_MB` to an integer from 1 to 2048
 to change the limit. The header shows cache usage; Ctrl+E persists the
 enable/disable choice and Ctrl+K clears saved media without deleting text
-history or explicitly downloaded files. Already displayed images remain in
+history, preferences, or explicitly downloaded files. Already displayed images remain in
 memory until the conversation changes or tuiline exits. Signing out does not
 erase saved media; clear it explicitly if needed. The local build
 supports 5,000 chats. Drafts live in memory.
+
+Local toggle preferences use versioned JSON settings files with private directory
+(0700) and file (0600) permissions. Hints are global; preview mode, automatic
+mark-as-read, and media-cache enablement are per account in
+`$XDG_CACHE_HOME/tuiline/accounts/<account-hash>/settings.json`.
+Both files use `{"version":1,"preferences":{...}}` with boolean settings
+(`hintsVisible` globally; `autoImages`, `markReadEnabled`, and
+`mediaCacheEnabled` per account). Missing settings default to enabled.
+Old `auto-images-off`, `mark-read-off`, and `disabled` cache markers migrate
+automatically; existing JSON settings take precedence. Legacy markers are removed
+only after their choices are saved successfully. Settings previously stored in
+`$XDG_CONFIG_HOME/tuiline/` migrate to the corresponding cache paths automatically,
+with existing cache settings taking precedence. Clearing or deleting the media
+cache does not reset these preferences; deleting the entire tuiline cache does.
+
 Uncertain sends are shown and blocked from
 automatic resending; check LINE and refresh before deliberately trying again.
 Desktop notifications are enabled through `notify-send` while the app is running.

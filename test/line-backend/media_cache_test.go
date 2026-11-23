@@ -16,6 +16,8 @@ import (
 )
 
 func TestMediaCacheReusesSanitizedAssetsAfterRestart(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "tuiline", "media")
 	account := "u" + strings.Repeat("a", 43)
 	chat := "c" + strings.Repeat("c", 43)
@@ -89,6 +91,8 @@ func testMediaImage(t *testing.T) string {
 }
 
 func TestMediaCacheRestartIsolationAndControls(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "tuiline", "media")
 	account := "u" + strings.Repeat("a", 43)
 	other := "u" + strings.Repeat("b", 43)
@@ -135,6 +139,8 @@ func TestMediaCacheRestartIsolationAndControls(t *testing.T) {
 }
 
 func TestMediaCacheRejectsCorruptionUnsafeFilesAndExpiry(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "tuiline", "media")
 	account := "u" + strings.Repeat("a", 43)
 	cache := openMediaCache(root, account)
@@ -185,6 +191,8 @@ func TestMediaCacheRejectsCorruptionUnsafeFilesAndExpiry(t *testing.T) {
 }
 
 func TestMediaCacheEvictsLeastRecentlyUsed(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("TUILINE_MEDIA_CACHE_MB", "1")
 	root := filepath.Join(t.TempDir(), "tuiline", "media")
 	account := "u" + strings.Repeat("a", 43)
@@ -216,6 +224,8 @@ func TestMediaCacheEvictsLeastRecentlyUsed(t *testing.T) {
 }
 
 func TestMediaCacheIncrementalUsageAndPeriodicReconciliation(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	cache := openMediaCache(filepath.Join(t.TempDir(), "tuiline", "media"), "u"+strings.Repeat("a", 43))
 	img := testMediaImage(t)
 	initialScan := cache.scannedAt
@@ -252,6 +262,8 @@ func TestMediaCacheIncrementalUsageAndPeriodicReconciliation(t *testing.T) {
 }
 
 func BenchmarkMediaCacheUsage(b *testing.B) {
+	b.Setenv("XDG_CACHE_HOME", b.TempDir())
+	b.Setenv("XDG_CONFIG_HOME", b.TempDir())
 	cache := openMediaCache(filepath.Join(b.TempDir(), "tuiline", "media"), "u"+strings.Repeat("a", 43))
 	for i := 0; i < 1000; i++ {
 		if err := os.WriteFile(cache.path("thumbnail", strconv.Itoa(i)), []byte("{}"), 0600); err != nil {
@@ -282,6 +294,8 @@ func BenchmarkMediaCacheUsage(b *testing.B) {
 }
 
 func TestStickerCatalogShowsCacheThenRefreshes(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "tuiline", "media")
 	account := "u" + strings.Repeat("a", 43)
 	chat := "c" + strings.Repeat("c", 43)
@@ -318,6 +332,8 @@ func TestStickerCatalogShowsCacheThenRefreshes(t *testing.T) {
 }
 
 func TestDeletedMessagePurgesSavedPreviews(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "tuiline", "media")
 	account := "u" + strings.Repeat("a", 43)
 	chat := "c" + strings.Repeat("c", 43)
@@ -336,6 +352,8 @@ func TestDeletedMessagePurgesSavedPreviews(t *testing.T) {
 }
 
 func TestAutoImagesToggleControlsThumbnailDownloads(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "tuiline", "media")
 	account := "u" + strings.Repeat("a", 43)
 	chat := "c" + strings.Repeat("c", 43)
@@ -378,6 +396,8 @@ func TestAutoImagesToggleControlsThumbnailDownloads(t *testing.T) {
 }
 
 func TestThumbnailErrorRetriesWhenItReentersViewport(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "media")
 	account := "u" + strings.Repeat("a", 43)
 	chat := "c" + strings.Repeat("c", 43)
@@ -420,6 +440,8 @@ func TestThumbnailErrorRetriesWhenItReentersViewport(t *testing.T) {
 }
 
 func TestClearingCachePreventsInFlightThumbnailFromBeingSaved(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	root := filepath.Join(t.TempDir(), "media")
 	account := "u" + strings.Repeat("a", 43)
 	chat := "c" + strings.Repeat("c", 43)
