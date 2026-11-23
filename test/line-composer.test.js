@@ -101,6 +101,64 @@ test('composer grows to five rows, scrolls, and stays inside its pane after resi
   assert.equal(e.app.input.height, 5);
 });
 
+test('short terminals shrink the composer and keep reply/status rows outside the pane', async (t) => {
+  const e = await editor(t);
+  e.app.input.value = Array.from({ length: 9 }, (_, i) => `Line ${i}`).join('\n');
+  for (const reply of [undefined, { id: '1', sender: 'Alice', text: 'Reply text' }]) {
+    for (const height of [6, 8, 9, 12, 25, 8]) {
+      e.backend.emit('state', { ...e.view, draft: e.app.input.value, reply });
+      e.resize(80, height);
+      await e.renderOnce();
+      await e.renderOnce();
+      const input = e.app.input;
+      const pane = input.parent;
+      const status = e.renderer.root.findDescendantById('line-status');
+      if (!input.visible) {
+        assert.ok(pane.height <= 2);
+        assert.ok(input.value.endsWith('Line 8'), 'a terminal too short for the editor must retain its draft');
+        continue;
+      }
+      assert.ok(input.height >= 1 && input.height <= 5);
+      assert.ok(input.y >= pane.y + 1);
+      assert.ok(
+        input.y + input.height <= pane.y + pane.height - 1,
+        `composer must fit at terminal height ${height}, reply=${Boolean(reply)}`,
+      );
+      assert.ok(input.y + input.height < status.y, 'composer must not occupy a status row');
+      assert.ok(input.scrollY > 0);
+      assert.equal(input.logicalCursor.row, 8);
+      assert.match(e.captureCharFrame().split('\n')[input.y + input.height - 1], /Line 8/);
+    }
+  }
+});
+
+test('a compact mention popup keeps its selection and composer visible in a short terminal', async (t) => {
+  const e = await editor(t, {
+    height: 8,
+    extra: {
+      chats: [{ id: 'chat', name: 'Group', group: true }],
+      reply: { id: '1', sender: 'Alice', text: 'Reply text' },
+      membersStatus: 'ready',
+      members: Array.from({ length: 8 }, (_, i) => ({ id: `u-person-${i}`, name: `Person ${i}` })),
+    },
+  });
+  e.app.input.value = '1\n2\n3\n4\n5\n@';
+  const popup = e.renderer.root.findDescendantById('line-mention-picker');
+  for (let i = 0; i < 8; i++) {
+    await e.renderOnce();
+    await e.renderOnce();
+    assert.ok(popup.height >= 1);
+    assert.ok(popup.y + popup.height <= e.app.input.y);
+    assert.ok(e.app.input.y + e.app.input.height <= e.app.input.parent.y + e.app.input.parent.height - 1);
+    assert.match(e.captureCharFrame().split('\n')[popup.y], new RegExp(`› Person ${i}`));
+    if (i < 7) e.mockInput.pressArrow('down');
+  }
+  e.mockInput.pressEnter();
+  assert.equal(e.app.input.value, '1\n2\n3\n4\n5\n@Person 7 ');
+  await e.renderOnce();
+  assert.equal(popup.visible, false);
+});
+
 test('composer enforces the UTF-16 length limit, including selection replacement', async (t) => {
   const e = await editor(t);
   e.app.input.value = `${'a'.repeat(9999)}😀`;

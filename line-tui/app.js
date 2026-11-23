@@ -155,6 +155,11 @@ async function createApp(
   pane.add(loginText);
   pane.add(linkPicker);
   pane.add(input);
+  pane.onSizeChange = () => {
+    // A bordered pane with no interior row cannot display an editor. Preserve
+    // its draft and restore it as soon as the terminal has usable space again.
+    input.visible = pane.height > 2;
+  };
   const fileInput = new Input(renderer, {
     id: 'line-file-paths',
     height: 1,

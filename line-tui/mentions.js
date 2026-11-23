@@ -28,6 +28,7 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     id: 'line-mention-picker',
     visible: false,
     height: 1,
+    minHeight: 0,
     flexShrink: 0,
     fg: theme.selectionForeground,
     bg: theme.selectionBackground,
@@ -70,6 +71,38 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     mentions = editMentions(text, input.value, mentions);
     text = input.value;
   };
+  const sizePopup = (requested) => {
+    const height = Math.min(requested, Math.max(0, parent.height - 3));
+    popup.height = height;
+    popup.visible = height > 0;
+    return height;
+  };
+  const paintCandidates = () => {
+    if (!trigger) return;
+    if (getView().membersStatus !== 'ready') {
+      sizePopup(1);
+      return;
+    }
+    const header = ` @ 群組成員 (${candidates.length}) · ↑/↓ 選擇 · Enter/Tab 插入 · Esc 關閉`;
+    // Reserve the pane's borders and one editable row. The remaining rows can
+    // show candidates; omit the header when only one candidate row fits.
+    const height = sizePopup(Math.min(candidates.length + 1, 7));
+    if (height === 0) return;
+    const count = Math.min(6, Math.max(1, height - 1));
+    const first = Math.max(0, cursor - count + 1);
+    const visible = candidates.slice(first, first + count);
+    const body = visible.length
+      ? visible.map((member, index) => ` ${first + index === cursor ? '›' : ' '} ${member.name}`).join('\n')
+      : ' 沒有符合的成員';
+    const content = height > 1 ? `${header}\n${body}` : body;
+    if (popup.plainText !== content) popup.content = content;
+  };
+  popup.renderBefore = paintCandidates;
+  const resizeParent = parent.onSizeChange;
+  parent.onSizeChange = () => {
+    resizeParent?.call(parent);
+    paintCandidates();
+  };
   const paint = () => {
     reconcile();
     if (!isInsert() || !group()) {
@@ -98,7 +131,7 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     const view = getView();
     if (view.membersStatus !== 'ready') {
       if (view.membersStatus !== 'error') request();
-      popup.height = 1;
+      sizePopup(1);
       popup.content =
         view.membersStatus === 'error' ? ' 無法載入群組成員 · Ctrl+R 重試 · Esc 關閉' : ' 正在載入群組成員…';
       candidates = [];
@@ -107,14 +140,7 @@ async function createMentionPicker(renderer, backend, { parent, input, getView, 
     const query = match[1].toLocaleLowerCase();
     candidates = (view.members || []).filter((member) => member.name.toLocaleLowerCase().includes(query));
     cursor = Math.max(0, Math.min(cursor, candidates.length - 1));
-    const first = Math.max(0, cursor - 5);
-    const visible = candidates.slice(first, first + 6);
-    popup.height = visible.length + 1;
-    popup.content = ` @ 群組成員 (${candidates.length}) · ↑/↓ 選擇 · Enter/Tab 插入 · Esc 關閉\n${
-      visible.length
-        ? visible.map((member, index) => ` ${first + index === cursor ? '›' : ' '} ${member.name}`).join('\n')
-        : ' 沒有符合的成員'
-    }`;
+    paintCandidates();
   };
   const choose = () => {
     if (!trigger || !candidates[cursor]) return;

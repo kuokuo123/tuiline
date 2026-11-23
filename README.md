@@ -88,7 +88,9 @@ does not publish one. The source-build instructions above work without npm publi
 | Ctrl+C                   | Quit                                                            |
 
 The composer supports multiline editing and pasted text. It grows up to five
-rows, then scrolls internally; Enter sends the complete draft. Shift+Enter needs
+rows, shrinks to the available pane space, then scrolls internally; Enter sends
+the complete draft. If no interior row fits, the editor is hidden until the
+terminal grows again, without discarding its draft. Shift+Enter needs
 a terminal that reports it distinctly from Enter. Drafts, replies, and group
 mentions retain their line breaks. Ctrl+Z undoes edits; Ctrl+Shift+Z redoes them.
 

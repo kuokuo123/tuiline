@@ -17,7 +17,7 @@ async function createComposer(renderer, options) {
         height: 'auto',
         minHeight: 1,
         maxHeight: 5,
-        flexShrink: 0,
+        flexShrink: 1,
         wrapMode: 'word',
         keyBindings: [
           ...['return', 'kpenter', 'linefeed'].flatMap((name) => [
