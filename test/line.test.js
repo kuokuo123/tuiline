@@ -10,6 +10,256 @@ const { Backend, resolveBackend } = require('../line-tui/backend');
 const { createApp, clean } = require('../line-tui/app');
 const { loadHintsVisible } = require('../line-tui/preferences');
 
+test('H/M/L select visible messages by screen position without opening links or moving the viewport', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 100, height: 24, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [],
+    opened = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend, { openLink: (url) => opened.push(url) });
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const messages = Array.from({ length: 40 }, (_, index) => ({
+    id: String(index),
+    text: `Message ${index}\n${'wrapped content '.repeat((index % 4) * 8)}\nhttps://example.com/${index}`,
+  }));
+  const state = {
+    mode: 'demo',
+    status: 'ready',
+    session: 'test',
+    selection: 1,
+    selectedId: 'chat',
+    chats: [{ id: 'chat', name: 'Chat' }],
+    messages,
+  };
+  backend.emit('state', state);
+  await setup.renderOnce();
+  setup.mockInput.pressEnter();
+  await setup.renderOnce();
+  const history = setup.renderer.root.findDescendantById('line-history');
+  for (const [key, modifiers, position] of [
+    ['H', {}, 'top'],
+    ['m', { shift: true }, 'middle'],
+    ['L', {}, 'bottom'],
+    ['h', { shift: true }, 'top'],
+    ['M', {}, 'middle'],
+  ]) {
+    history.scrollTo(39);
+    await setup.renderOnce();
+    const top = history.viewport.y,
+      middle = top + Math.floor(history.viewport.height / 2);
+    const visible = messages
+      .map((_, index) => ({
+        row: setup.renderer.root.findDescendantById(`line-message-${index}`),
+        index,
+      }))
+      .filter(({ row }) => row.height > 0 && row.y < top + history.viewport.height && row.y + row.height > top);
+    assert.ok(visible[0].index > 0);
+    assert.ok(visible.at(-1).index < messages.length - 1);
+    let target = position === 'top' ? visible[0] : visible.at(-1);
+    if (position === 'middle') {
+      const distance = ({ row }) => Math.max(row.y - middle, middle - (row.y + row.height - 1), 0);
+      target = visible.reduce((nearest, entry) => (distance(entry) < distance(nearest) ? entry : nearest));
+    }
+    const scroll = history.scrollTop;
+    setup.mockInput.pressKey(key, modifiers);
+    await setup.renderOnce();
+    assert.match(
+      setup.renderer.root.findDescendantById('line-hints').plainText,
+      new RegExp(`SCROLL \\[${target.index + 1}/${messages.length}\\]`),
+    );
+    assert.equal(history.scrollTop, scroll);
+    assert.equal(opened.length, 0);
+  }
+  assert.equal(commands.filter(({ action }) => action === 'select').length, 0);
+  backend.emit('state', { ...state, messages: [] });
+  await setup.renderOnce();
+  for (const key of ['H', 'M', 'L']) setup.mockInput.pressKey(key);
+  assert.equal(opened.length, 0);
+});
+
+for (const pane of ['chats', 'history']) {
+  test(`paging uses the focused ${pane} pane and leaves insert-mode navigation to the editor`, async (t) => {
+    const { createTestRenderer } = await import('@opentui/core/testing');
+    const setup = await createTestRenderer({ width: 100, height: 24, kittyKeyboard: true });
+    const backend = new EventEmitter();
+    const commands = [];
+    backend.command = (command) => commands.push(command);
+    backend.close = () => {};
+    const app = await createApp(setup.renderer, backend);
+    t.after(() => {
+      app.dispose();
+      setup.renderer.destroy();
+    });
+    backend.emit('state', {
+      mode: 'demo',
+      status: 'ready',
+      session: 'test',
+      selection: 1,
+      selectedId: 'chat-0',
+      chats: Array.from({ length: 60 }, (_, index) => ({
+        id: `chat-${index}`,
+        name: `Chat ${index}`,
+        preview: 'Preview',
+      })),
+      messages: Array.from({ length: 60 }, (_, index) => ({ id: String(index), text: `Message ${index}` })),
+    });
+    await setup.renderOnce();
+    if (pane === 'history') setup.mockInput.pressEnter();
+    await setup.renderOnce();
+    await setup.mockInput.pressKeys(['g', 'g']);
+    await setup.renderOnce();
+    const chats = setup.renderer.root.findDescendantById('line-chats');
+    const history = setup.renderer.root.findDescendantById('line-history');
+    const scroll = pane === 'chats' ? chats : history;
+    const other = pane === 'chats' ? history : chats;
+    const otherTop = other.scrollTop;
+    const full = scroll.viewport.height,
+      half = Math.max(1, Math.floor(full / 2));
+    const pageKeys = { pagedown: '\x1b[6~', pageup: '\x1b[5~' };
+    const initialSelects = commands.filter(({ action }) => action === 'select').length;
+    for (const [key, modifiers, distance] of [
+      ['d', { ctrl: true }, half],
+      ['u', { ctrl: true }, -half],
+      ['f', { ctrl: true }, full],
+      ['b', { ctrl: true }, -full],
+      ['pagedown', {}, full],
+      ['pageup', {}, -full],
+    ]) {
+      const before = scroll.scrollTop;
+      setup.mockInput.pressKey(pageKeys[key] || key, modifiers);
+      assert.equal(scroll.scrollTop, before + distance, `${key} should scroll ${distance} rows`);
+      assert.equal(other.scrollTop, otherTop);
+      await setup.renderOnce();
+    }
+    const selects = commands.filter(({ action }) => action === 'select');
+    if (pane === 'chats') {
+      assert.equal(selects.length, initialSelects + 6);
+      assert.notEqual(selects[initialSelects].id, 'chat-0');
+    } else {
+      assert.equal(selects.length, initialSelects);
+    }
+    setup.mockInput.pressKey('\x1b[5~');
+    assert.equal(scroll.scrollTop, 0);
+    setup.mockInput.pressKey('G');
+    await setup.renderOnce();
+    setup.mockInput.pressKey('\x1b[6~');
+    assert.equal(scroll.scrollTop, Math.max(0, scroll.scrollHeight - scroll.viewport.height));
+    setup.mockInput.pressKey('i');
+    await setup.renderOnce();
+    await setup.mockInput.typeText('HML');
+    assert.equal(app.input.value, 'HML');
+    const beforeChats = chats.scrollTop,
+      beforeHistory = history.scrollTop;
+    const beforeCommands = commands.length;
+    for (const [key, modifiers] of [
+      ['f', { ctrl: true }],
+      ['b', { ctrl: true }],
+      ['d', { ctrl: true }],
+      ['u', { ctrl: true }],
+      ['pagedown', {}],
+      ['pageup', {}],
+    ]) {
+      setup.mockInput.pressKey(pageKeys[key] || key, modifiers);
+      await setup.renderOnce();
+      assert.equal(chats.scrollTop, beforeChats, `${key} must not navigate chats in insert mode`);
+      assert.equal(history.scrollTop, beforeHistory, `${key} must not navigate history in insert mode`);
+    }
+    assert.equal(commands.slice(beforeCommands).filter(({ action }) => action === 'select').length, 0);
+    assert.match(setup.renderer.root.findDescendantById('line-hints').plainText, /INSERT/);
+  });
+}
+
+test('H/M/L select viewport chats without scrolling or changing lowercase and insert keys', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 100, height: 20, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const chats = Array.from({ length: 40 }, (_, index) => ({
+    id: `chat-${index}`,
+    name: `Chat ${index}${index % 3 === 0 ? ' with a longer wrapped name'.repeat(2) : ''}`,
+    preview: 'Preview',
+  }));
+  backend.emit('state', {
+    mode: 'demo',
+    status: 'ready',
+    session: 'test',
+    selection: 1,
+    selectedId: chats[0].id,
+    chats,
+    messages: [],
+  });
+  await setup.renderOnce();
+  await setup.renderOnce();
+  const pane = setup.renderer.root.findDescendantById('line-chats');
+  for (const [key, modifiers, position] of [
+    ['H', {}, 'top'],
+    ['l', { shift: true }, 'bottom'],
+    ['M', {}, 'middle'],
+    ['h', { shift: true }, 'top'],
+    ['L', {}, 'bottom'],
+  ]) {
+    pane.scrollTo(31);
+    await setup.renderOnce();
+    const top = pane.viewport.y,
+      bottom = top + pane.viewport.height;
+    const visible = chats
+      .map((chat, index) => ({
+        chat,
+        row: setup.renderer.root.findDescendantById(`line-chat-${index}`),
+      }))
+      .filter(({ row }) => row.height > 0 && row.y < bottom && row.y + row.height > top);
+    assert.notEqual(visible[0].chat.id, chats[0].id, 'test must use a scrolled viewport');
+    assert.notEqual(visible.at(-1).chat.id, chats.at(-1).id);
+    let expected = position === 'top' ? visible[0] : visible.at(-1);
+    if (position === 'middle') {
+      const middle = top + Math.floor(pane.viewport.height / 2);
+      expected =
+        visible.find(({ row }) => row.y <= middle && row.y + row.height > middle) ||
+        [...visible].sort(
+          (a, b) =>
+            Math.min(Math.abs(a.row.y - middle), Math.abs(a.row.y + a.row.height - 1 - middle)) -
+            Math.min(Math.abs(b.row.y - middle), Math.abs(b.row.y + b.row.height - 1 - middle)),
+        )[0];
+    }
+    const scroll = pane.scrollTop;
+    setup.mockInput.pressKey(key, modifiers);
+    await setup.renderOnce();
+    assert.equal(commands.findLast((command) => command.action === 'select').id, expected.chat.id);
+    assert.equal(pane.scrollTop, scroll, `${key} must not move the viewport`);
+  }
+  const selects = commands.filter((command) => command.action === 'select').length;
+  setup.mockInput.pressKey('l');
+  await setup.renderOnce();
+  assert.match(setup.renderer.root.findDescendantById('line-hints').plainText, /SCROLL/);
+  setup.mockInput.pressKey('h');
+  await setup.renderOnce();
+  assert.match(setup.renderer.root.findDescendantById('line-hints').plainText, /CHATS/);
+  setup.mockInput.pressKey('i');
+  await setup.mockInput.typeText('HML');
+  assert.equal(app.input.value, 'HML');
+  assert.equal(commands.filter((command) => command.action === 'select').length, selects);
+  setup.mockInput.pressEscape();
+  setup.mockInput.pressKey('h');
+  backend.emit('state', { mode: 'demo', chats: [], messages: [] });
+  await setup.renderOnce();
+  setup.mockInput.pressKey('H');
+  setup.mockInput.pressKey('M');
+  setup.mockInput.pressKey('L');
+  assert.equal(commands.filter((command) => command.action === 'select').length, selects);
+});
+
 test('chat and message rows are reused across updates and reorder, with current mouse targets', async (t) => {
   const { createTestRenderer, createMockMouse } = await import('@opentui/core/testing');
   const setup = await createTestRenderer({ width: 110, height: 25, kittyKeyboard: true });
@@ -809,7 +1059,7 @@ test('chat navigation keeps wrapped rows and their marker visible throughout the
   }
 });
 
-test('l/L opens one hyperlink and provides a keyboard picker for multiple links', async (t) => {
+test('l opens one hyperlink and provides a keyboard picker for multiple links', async (t) => {
   const { createTestRenderer } = await import('@opentui/core/testing');
   const setup = await createTestRenderer({ width: 100, height: 30 });
   const backend = new EventEmitter();
@@ -824,10 +1074,10 @@ test('l/L opens one hyperlink and provides a keyboard picker for multiple links'
   const view = { chats: [], messages: [{ text: 'Visit https://example.com.' }], selectedId: 'test' };
   backend.emit('state', view);
   setup.mockInput.pressEnter();
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   assert.deepEqual(opened, ['https://example.com']);
   backend.emit('state', { ...view, messages: [{ text: 'https://example.com https://example.org' }] });
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   await setup.renderOnce();
   assert.match(setup.captureCharFrame(), /Open link/);
   setup.mockInput.pressKey('J');
@@ -835,7 +1085,7 @@ test('l/L opens one hyperlink and provides a keyboard picker for multiple links'
   setup.mockInput.pressKey('J');
   setup.mockInput.pressKey('L');
   assert.equal(opened.at(-1), 'https://example.org');
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   setup.mockInput.pressEscape();
   assert.equal(opened.length, 2);
 });
@@ -909,7 +1159,7 @@ test('conversation focus starts in scroll mode and Escape restores Vim scrolling
   assert.match(setup.captureCharFrame(), /SCROLL/);
 });
 
-test('message cursor scopes l/L and sent ticks change only with a read receipt', async (t) => {
+test('message cursor scopes l and sent ticks change only with a read receipt', async (t) => {
   const { createTestRenderer } = await import('@opentui/core/testing');
   const setup = await createTestRenderer({ width: 100, height: 30, kittyKeyboard: true });
   const backend = new EventEmitter();
@@ -934,7 +1184,7 @@ test('message cursor scopes l/L and sent ticks change only with a read receipt',
   backend.emit('state', view);
   setup.mockInput.pressEnter();
   setup.mockInput.pressKey('k');
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   assert.deepEqual(opened, ['https://first.example']);
   await setup.renderOnce();
   assert.match(setup.captureCharFrame(), /You ✓/);
@@ -942,7 +1192,7 @@ test('message cursor scopes l/L and sent ticks change only with a read receipt',
   backend.emit('state', { ...view, messages: [{ ...view.messages[0], read: true }, view.messages[1]] });
   await setup.renderOnce();
   assert.match(setup.captureCharFrame(), /You ✓✓/);
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   assert.equal(opened.at(-1), 'https://first.example');
 });
 
@@ -1160,7 +1410,7 @@ test('a UI listener exception is never misreported as invalid backend JSON', () 
   );
 });
 
-test('gg and G jump to list boundaries without interfering with l/L or insert mode', async (t) => {
+test('gg and G jump to list boundaries without interfering with l or insert mode', async (t) => {
   const { createTestRenderer } = await import('@opentui/core/testing');
   const setup = await createTestRenderer({ width: 100, height: 25, kittyKeyboard: true });
   const backend = new EventEmitter();
@@ -1191,11 +1441,11 @@ test('gg and G jump to list boundaries without interfering with l/L or insert mo
   await setup.mockInput.pressKeys(['g', 'g']);
   const history = setup.renderer.root.findDescendantById('line-history');
   assert.equal(history.scrollTop, 0);
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   assert.equal(opened.at(-1), 'https://example.com/0');
   setup.mockInput.pressKey('g', { shift: true });
   assert.equal(history.scrollTop, Math.max(0, history.scrollHeight - history.viewport.height));
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   assert.equal(opened.at(-1), 'https://example.com/49');
   setup.mockInput.pressKey('i');
   await setup.mockInput.typeText('ggG');
@@ -1227,20 +1477,20 @@ test('h leaves conversation focus and l enters scroll mode while insert mode kee
     session: 'test',
   });
   await setup.renderOnce();
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   setup.mockInput.pressKey('K');
   await setup.renderOnce();
   assert.match(setup.captureCharFrame(), /SCROLL/);
   assert.equal(commands.length, 0);
-  setup.mockInput.pressKey('H');
+  setup.mockInput.pressKey('h');
   setup.mockInput.pressKey('J');
   assert.deepEqual(commands.at(-1), { action: 'select', id: 'bob' });
-  setup.mockInput.pressKey('L');
+  setup.mockInput.pressKey('l');
   setup.mockInput.pressKey('i');
   await setup.mockInput.typeText('hlJKHL');
   assert.equal(app.input.value, 'hlJKHL');
   setup.mockInput.pressEscape();
-  setup.mockInput.pressKey('H');
+  setup.mockInput.pressKey('h');
   await setup.renderOnce();
   assert.match(setup.captureCharFrame(), /CHATS/);
   setup.mockInput.pressKey('l', { ctrl: true });

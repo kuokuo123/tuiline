@@ -53,6 +53,7 @@ does not publish one. The source-build instructions above work without npm publi
 | Key                      | Action                                                          |
 | ------------------------ | --------------------------------------------------------------- |
 | Up/Down, j/k             | Select a sidebar chat or move the message cursor in scroll mode |
+| H / M / L                | Select top / middle / bottom visible chat or message            |
 | k at first / j at last   | Load the previous / next saved 100-message history page         |
 | h / l                    | Leave / enter conversation focus (outside insert mode)          |
 | Tab                      | Switch sidebar / conversation scroll mode                       |
@@ -65,10 +66,10 @@ does not publish one. The source-build instructions above work without npm publi
 | Enter in insert mode     | Send text                                                       |
 | Shift+Enter in insert    | Insert a newline (enhanced keyboard support required)           |
 | Escape                   | Return to scroll mode, preserving your draft                    |
-| Ctrl+F / Ctrl+B          | Move a full page down / up in scroll mode                       |
-| Ctrl+D / Ctrl+U          | Move half a page down / up in scroll mode                       |
+| Ctrl+F / Ctrl+B          | Move a full page down / up in the focused pane (not insert)     |
+| Ctrl+D / Ctrl+U          | Move half a page down / up in the focused pane (not insert)     |
 | gg / G                   | Jump to the top / bottom of the focused list                    |
-| PageUp/PageDown          | Scroll loaded history                                           |
+| PageUp/PageDown          | Full page up / down in the focused pane (not insert)            |
 | g then x                 | Open links in the marked message; pick a link if several        |
 | Ctrl+R                   | Refresh                                                         |
 | Ctrl+N                   | Test Linux desktop notification delivery (live mode)            |
@@ -87,6 +88,9 @@ does not publish one. The source-build instructions above work without npm publi
 | Ctrl+Y                   | Confirm login when requested                                    |
 | Ctrl+X                   | Cancel login                                                    |
 | Ctrl+C                   | Quit                                                            |
+
+`H/M/L` and paging shortcuts navigate only outside insert mode. In insert mode,
+typing and editor keybindings remain unchanged.
 
 The composer supports multiline editing and pasted text. It grows up to five
 rows, shrinks to the available pane space, then scrolls internally; Enter sends

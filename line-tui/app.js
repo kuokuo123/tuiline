@@ -55,6 +55,7 @@ async function createApp(
   });
   const body = new Box(renderer, { flexDirection: 'row', flexGrow: 1, minHeight: 0 });
   const chats = new ScrollBox(renderer, {
+    id: 'line-chats',
     width: '30%',
     minWidth: 20,
     border: true,
@@ -297,13 +298,14 @@ async function createApp(
       content: [
         ' NAVIGATION',
         ' j/k or Up/Down          Select a chat or message',
+        ' H / M / L               Select top / middle / bottom visible row',
         ' h / l, Tab              Leave / enter conversation',
         ' Enter                   Open a chat',
         ' gg / G                  Jump to first / last',
         ' k/j at history edge     Previous / next saved page',
         ' Ctrl+B/F                Scroll back / forward one page',
         ' Ctrl+U/D                Scroll back / forward half a page',
-        ' PageUp/PageDown         Scroll the conversation',
+        ' PageUp/PageDown         Page up / down in the focused pane',
         '',
         ' COMPOSING',
         ' i                       Insert mode',
@@ -464,8 +466,8 @@ async function createApp(
     pane.borderColor = mode === 'chats' ? theme.border : green;
     highlightMessages();
     const help = {
-      chats: 'CHATS · j/k move · Enter open',
-      history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k move · i insert`,
+      chats: 'CHATS · j/k move · H/M/L viewport · Enter open',
+      history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k move · H/M/L viewport · i insert`,
       insert: 'INSERT · Enter send · Shift+Enter newline · Esc scroll',
     };
     const shortHelp = {
@@ -1101,9 +1103,18 @@ async function createApp(
       /^[jkhl]$/i.test(key.name)
         ? key.name.toLowerCase()
         : key.name;
+    const viewportKey =
+      mode !== 'insert' &&
+      !key.ctrl &&
+      !key.meta &&
+      (key.shift || /^[HML]$/.test(key.name)) &&
+      /^[hml]$/i.test(key.name)
+        ? key.name.toLowerCase()
+        : '';
     if (
       (key.ctrl && ['c', 'r', 'l', 'y', 'x', 'e', 'k', 'p'].includes(name)) ||
-      ['tab', 'escape', 'pageup', 'pagedown'].includes(name)
+      ['tab', 'escape'].includes(name) ||
+      (mode !== 'insert' && ['pageup', 'pagedown'].includes(name))
     ) {
       key.preventDefault?.();
     }
@@ -1190,9 +1201,11 @@ async function createApp(
       }
       // Transfers own the send slot, not the entire interface. Keep browsing
       // available, but don't start another mutation or media operation.
-      const navigation = key.ctrl
-        ? ['b', 'f', 'u', 'd'].includes(name)
-        : ['tab', 'pageup', 'pagedown', 'j', 'k', 'h', 'l', 'g', 'G', 'up', 'down', 'return'].includes(name);
+      const navigation =
+        viewportKey ||
+        (key.ctrl
+          ? ['b', 'f', 'u', 'd'].includes(name)
+          : ['tab', 'pageup', 'pagedown', 'j', 'k', 'h', 'l', 'g', 'G', 'up', 'down', 'return'].includes(name));
       if (!navigation || key.meta) {
         key.preventDefault?.();
         return;
@@ -1296,6 +1309,36 @@ async function createApp(
       paintLinks();
       return;
     }
+    if (viewportKey) {
+      key.preventDefault?.();
+      prefixAt = 0;
+      const scroll = mode === 'chats' ? chats : history;
+      const rows = mode === 'chats' ? chatRows : messageRows;
+      if (failed || view.login?.active || scroll.viewport.height <= 0) return;
+      const top = scroll.viewport.y;
+      const bottom = top + scroll.viewport.height;
+      const visible = rows
+        .map((entry, index) => ({ row: entry.row, index }))
+        .filter(({ row }) => row.height > 0 && row.y < bottom && row.y + row.height > top);
+      if (!visible.length) return;
+      let target = viewportKey === 'h' ? visible[0] : visible.at(-1);
+      if (viewportKey === 'm') {
+        const middle = top + Math.floor(scroll.viewport.height / 2);
+        const distance = ({ row }) => Math.max(row.y - middle, middle - (row.y + row.height - 1), 0);
+        target = visible.reduce((nearest, entry) => (distance(entry) < distance(nearest) ? entry : nearest));
+      }
+      if (mode === 'chats') {
+        flushDraft();
+        cursor = target.index;
+        backend.command({ action: 'select', id: view.chats[cursor].id });
+        paintChats();
+      } else {
+        openAtBottom = false;
+        messageCursor = target.index;
+        focus('history');
+      }
+      return;
+    }
     if (mode !== 'insert' && !key.ctrl && !key.meta) {
       const lowerG = name === 'g' && !key.shift;
       const prefixed = prefixAt && Date.now() - prefixAt < 1000;
@@ -1336,26 +1379,41 @@ async function createApp(
       focus('history');
       return;
     }
-    if (mode === 'history' && key.ctrl && ['f', 'b', 'd', 'u'].includes(name)) {
+    if (
+      mode !== 'insert' &&
+      !key.meta &&
+      ((key.ctrl && ['f', 'b', 'd', 'u'].includes(name)) || (!key.ctrl && ['pageup', 'pagedown'].includes(name)))
+    ) {
       key.preventDefault?.();
-      const fullPage = ['f', 'b'].includes(name);
-      const page = Math.max(1, Math.floor(history.viewport.height / (fullPage ? 1 : 2)));
-      const distance = ['f', 'd'].includes(name) ? page : -page;
-      const selected = messageRows[messageCursor];
+      prefixAt = 0;
+      const scroll = mode === 'chats' ? chats : history;
+      const rows = mode === 'chats' ? chatRows : messageRows;
+      const fullPage = ['f', 'b', 'pageup', 'pagedown'].includes(name);
+      const page = Math.max(1, Math.floor(scroll.viewport.height / (fullPage ? 1 : 2)));
+      const distance = ['f', 'd', 'pagedown'].includes(name) ? page : -page;
+      const selectedIndex = mode === 'chats' ? cursor : messageCursor;
+      const selected = rows[selectedIndex];
       if (selected) {
         const target = selected.row.y + distance;
-        let closest = messageCursor;
-        for (const [index, { row }] of messageRows.entries()) {
-          if (Math.abs(row.y - target) < Math.abs(messageRows[closest].row.y - target)) closest = index;
+        let closest = selectedIndex;
+        for (const [index, { row }] of rows.entries()) {
+          if (Math.abs(row.y - target) < Math.abs(rows[closest].row.y - target)) closest = index;
         }
-        messageCursor = closest;
-        focus('history');
-        history.scrollBy(distance);
+        if (mode === 'chats') {
+          if (failed || view.login?.active) return;
+          flushDraft();
+          cursor = closest;
+          backend.command({ action: 'select', id: view.chats[cursor].id });
+          paintChats();
+        } else {
+          openAtBottom = false;
+          messageCursor = closest;
+          focus('history');
+        }
       }
+      scroll.scrollBy(distance);
       return;
     }
-    if (name === 'pageup') history.scrollBy(-10);
-    if (name === 'pagedown') history.scrollBy(10);
     if (mode === 'insert' || key.ctrl || key.meta) return;
     if (name === 's' && !failed) {
       key.preventDefault?.();
