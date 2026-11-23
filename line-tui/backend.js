@@ -80,9 +80,15 @@ class Backend extends EventEmitter {
   }
 
   close() {
+    if (this.closed) return;
     this.closed = true;
+    if (typeof this.child.exitCode === 'number' || typeof this.child.signalCode === 'string') return;
+    // EOF lets Go cancel network work and drain queued history writes. Keep a
+    // bounded fallback for a backend that cannot shut down normally.
+    const timer = setTimeout(() => this.child.kill(), 5000);
+    timer.unref();
+    this.child.once('exit', () => clearTimeout(timer));
     this.child.stdin.end();
-    this.child.kill();
   }
 }
 
