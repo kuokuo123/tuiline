@@ -37,6 +37,10 @@ func TestPhotoAttachmentModeValidationAndSentType(t *testing.T) {
 			if file == nil || file.Image != (mode == "image") {
 				t.Fatalf("incorrect attachment mode: %#v", file)
 			}
+			if mode == "image" && (file.photo == nil || len(file.Data) != 0 ||
+				sentPhotoThumbnail(file) != file.photo.Thumbnail()) {
+				t.Fatal("photo was not prepared once into an opaque reusable snapshot")
+			}
 			c.Action, c.AttachmentID = "send", file.ID
 			e.Handle(c)
 			e.Wait()

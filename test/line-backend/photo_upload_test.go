@@ -3,6 +3,7 @@ package messaging
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"image"
@@ -194,4 +195,79 @@ func TestPhotoValidationAndPreviewFailureDoNotSend(t *testing.T) {
 	if _, err = client.SendFile("u-peer", Attachment{Name: "photo.png", Data: testPhoto(t, "png"), Image: true}, ""); err == nil || base.sent != nil || strings.Join(api.order, ",") != "original,preview" {
 		t.Fatal("preview failure sent message")
 	}
+}
+
+func TestPreparedPhotoOwnsValidatedBytesAndThumbnail(t *testing.T) {
+	for _, plain := range []bool{false, true} {
+		data := testPhoto(t, "png")
+		expected := append([]byte(nil), data...)
+		prepared, err := PreparePhoto(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		clear(data) // A caller cannot mutate or invalidate the prepared snapshot.
+		thumb, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(prepared.Thumbnail(), "data:image/jpeg;base64,"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg, format, err := image.DecodeConfig(bytes.NewReader(thumb))
+		if err != nil || format != "jpeg" || cfg.Width != 512 || cfg.Height != 256 {
+			t.Fatal("invalid reusable thumbnail")
+		}
+		client, base, crypto, _ := setup(t, plain)
+		api := &photoAPI{fakeAPI: base}
+		crypt := &fileCrypto{fakeCrypto: crypto}
+		client.crypto = crypt
+		client.Session.NewClient = func(string) session.API { return api }
+		if _, err := client.SendPreparedPhoto("u-peer", "photo.png", prepared, ""); err != nil {
+			t.Fatal(err)
+		}
+		got := api.original
+		if !plain {
+			var payload map[string]string
+			if err := json.Unmarshal(crypt.payloadSent, &payload); err != nil {
+				t.Fatal(err)
+			}
+			got, err = decryptFile(got, payload["keyMaterial"])
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !bytes.Equal(got, expected) {
+			t.Fatal("prepared send did not use its owned validated bytes")
+		}
+	}
+	if _, err := PreparePhoto([]byte("not an image")); err == nil {
+		t.Fatal("invalid photo prepared")
+	}
+}
+
+func BenchmarkPhotoPreparation(b *testing.B) {
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, image.NewRGBA(image.Rect(0, 0, 1600, 1200))); err != nil {
+		b.Fatal(err)
+	}
+	data := encoded.Bytes()
+	b.Run("repeated-decode", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var decoded image.Image
+			for pass := 0; pass < 4; pass++ {
+				var err error
+				_, decoded, err = decodePhoto(data)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+			preparedThumbnail(decoded)
+		}
+	})
+	b.Run("prepare-once", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if _, err := PreparePhoto(data); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

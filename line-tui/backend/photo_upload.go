@@ -3,10 +3,12 @@ package messaging
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"image"
-	_ "image/jpeg"
+	"image/color"
+	"image/jpeg"
 	_ "image/png"
 	"strconv"
 
@@ -20,32 +22,93 @@ type photoUpload struct {
 	extension      string
 }
 
+// PreparedPhoto owns its validated bytes. No mutable slices or decoded image
+// escape, so callers cannot invalidate validation between preparation and send.
+type PreparedPhoto struct {
+	data      []byte
+	info      *photoUpload
+	thumbnail string
+}
+
+func (p *PreparedPhoto) Thumbnail() string {
+	if p == nil {
+		return ""
+	}
+	return p.thumbnail
+}
+
+func PreparePhoto(data []byte) (*PreparedPhoto, error) {
+	if len(data) == 0 || len(data) > MaxAttachmentBytes {
+		return nil, errors.New("choose PNG/JPEG photos up to 20 MiB")
+	}
+	owned := append([]byte(nil), data...)
+	info, decoded, err := decodePhoto(owned)
+	if err != nil {
+		return nil, err
+	}
+	return &PreparedPhoto{data: owned, info: info, thumbnail: preparedThumbnail(decoded)}, nil
+}
+
+func (c *Client) SendPreparedPhoto(chat, name string, photo *PreparedPhoto, replyTo string) (*SendResult, error) {
+	if photo == nil || photo.info == nil || len(photo.data) == 0 {
+		return nil, errors.New("prepared photo unavailable")
+	}
+	return c.SendFile(chat, Attachment{Name: name, Data: photo.data, Image: true, prepared: photo}, replyTo)
+}
+
 // ValidatePhoto bounds decoded memory as well as input bytes. File extensions
 // are not trusted. Originals stay unchanged. Plain-photo previews are generated
 // by OBS; encrypted previews reuse the original ciphertext.
 func ValidatePhoto(data []byte) error {
-	_, err := preparePhoto(data)
+	_, err := PreparePhoto(data)
 	return err
 }
 
-func preparePhoto(data []byte) (*photoUpload, error) {
+func decodePhoto(data []byte) (*photoUpload, image.Image, error) {
 	if len(data) == 0 || len(data) > MaxAttachmentBytes {
-		return nil, errors.New("choose PNG/JPEG photos up to 20 MiB")
+		return nil, nil, errors.New("choose PNG/JPEG photos up to 20 MiB")
 	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || (format != "png" && format != "jpeg") || cfg.Width < 1 || cfg.Height < 1 ||
 		cfg.Width > 8192 || cfg.Height > 8192 || int64(cfg.Width)*int64(cfg.Height) > 32_000_000 {
-		return nil, errors.New("photos must be valid PNG/JPEG, at most 8192 per side and 32 megapixels")
+		return nil, nil, errors.New("photos must be valid PNG/JPEG, at most 8192 per side and 32 megapixels")
 	}
-	_, decoded, err := image.Decode(bytes.NewReader(data))
-	if err != nil || decoded != format {
-		return nil, errors.New("could not decode PNG/JPEG photo")
+	decoded, decodedFormat, err := image.Decode(bytes.NewReader(data))
+	if err != nil || decodedFormat != format {
+		return nil, nil, errors.New("could not decode PNG/JPEG photo")
 	}
 	ext := "jpg"
 	if format == "png" {
 		ext = "png"
 	}
-	return &photoUpload{cfg.Width, cfg.Height, cfg.Width, cfg.Height, ext}, nil
+	return &photoUpload{cfg.Width, cfg.Height, cfg.Width, cfg.Height, ext}, decoded, nil
+}
+
+func preparedThumbnail(source image.Image) string {
+	bounds := source.Bounds()
+	w, h := bounds.Dx(), bounds.Dy()
+	if max(w, h) > 512 {
+		w, h = max(1, w*512/max(bounds.Dx(), bounds.Dy())), max(1, h*512/max(bounds.Dx(), bounds.Dy()))
+	}
+	for {
+		small := image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				r, g, b, a := source.At(bounds.Min.X+(2*x+1)*bounds.Dx()/(2*w), bounds.Min.Y+(2*y+1)*bounds.Dy()/(2*h)).RGBA()
+				small.SetRGBA(x, y, color.RGBA{uint8((r + 65535 - a) >> 8), uint8((g + 65535 - a) >> 8), uint8((b + 65535 - a) >> 8), 255})
+			}
+		}
+		for _, quality := range []int{80, 60, 40} {
+			var out bytes.Buffer
+			if jpeg.Encode(&out, small, &jpeg.Options{Quality: quality}) == nil && out.Len() <= 65536 {
+				return "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(out.Bytes())
+			}
+		}
+		if w <= 64 && h <= 64 {
+			return ""
+		}
+		w, h = max(1, w/2), max(1, h/2)
+	}
 }
 
 var errPhotoMessageID = errors.New("response contained no message ID")
@@ -108,10 +171,15 @@ func (p *photoUpload) metadata(metadata map[string]string, size int) {
 }
 
 func (c *Client) uploadPhoto(file *Attachment, metadata map[string]string) ([]byte, error) {
-	photo, err := preparePhoto(file.Data)
-	if err != nil {
-		return nil, photoFailure("validate photo", err)
+	prepared := file.prepared
+	if prepared == nil {
+		var err error
+		prepared, err = PreparePhoto(file.Data)
+		if err != nil {
+			return nil, photoFailure("validate photo", err)
+		}
 	}
+	photo := prepared.info
 	data, key, err := encryptFile(file.Data)
 	if err != nil {
 		return nil, photoFailure("encrypt photo", err)
@@ -143,7 +211,6 @@ func (c *Client) uploadPhoto(file *Attachment, metadata map[string]string) ([]by
 	}
 	metadata["OID"], metadata["SID"] = oid, "emi"
 	metadata["FILE_SIZE"] = strconv.Itoa(len(file.Data))
-	photo.thumbW, photo.thumbH = photo.width, photo.height
 	photo.metadata(metadata, len(data))
 	return json.Marshal(map[string]string{"keyMaterial": key, "fileName": file.Name})
 }

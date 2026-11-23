@@ -70,11 +70,11 @@ function patchFile(file, source) {
  if attachment != nil { e.state.SentAttachmentID = attachment.ID }
  now := time.Now()`,
     );
-    change('type Attachment struct {', 'type Attachment struct {\n Image bool `json:"image"`');
+    change('type Attachment struct {', 'type Attachment struct {\n Image bool `json:"image"`\n photo *preparedPhoto');
     change(
       'e.mu.Lock()\n\t\tdefer e.mu.Unlock()\n\t\te.mutationActive = false',
       `sentThumb := ""
- if err == nil && attachment != nil && attachment.Image { sentThumb = photoThumbnail(attachment.Data) }
+ if err == nil && attachment != nil && attachment.Image { sentThumb = sentPhotoThumbnail(attachment) }
  e.mu.Lock()
  defer e.mu.Unlock()
  e.mutationActive = false`,
@@ -475,8 +475,12 @@ function patchFile(file, source) {
   }
   if (file === 'internal/gui/direct.go') {
     change(
-      'messaging.Attachment{Name: file.Name, Data: file.Data}',
-      'messaging.Attachment{Name: file.Name, Data: file.Data, Image: file.Image}',
+      'result, err = c.SendFile(chat, messaging.Attachment{Name: file.Name, Data: file.Data}, reply)',
+      `if file.Image && file.photo != nil {
+        result, err = c.SendPreparedPhoto(chat, file.Name, file.photo, reply)
+      } else {
+        result, err = c.SendFile(chat, messaging.Attachment{Name: file.Name, Data: file.Data, Image: file.Image}, reply)
+      }`,
     );
     change('names := map[string]string{}', 'muted := map[string]bool{}\n names := map[string]string{}');
     change('} else if names[c.ID] == "" {', '} else {');
@@ -642,8 +646,8 @@ function patchFile(file, source) {
       'file, err := snapshotFile(c.URL)',
       `file, err := snapshotFile(c.URL)
  if err == nil && c.Mode == "image" {
-   err = validatePhotoAttachment(file.Data)
-   if err == nil { file.Image = true }
+   file.photo, err = preparePhotoAttachment(file.Data)
+   if err == nil { file.Image = true; file.Data = nil }
  }`,
     );
     change(
@@ -817,7 +821,7 @@ function patchFile(file, source) {
     change('e.syncAvatars(false)', 'e.refreshResolvedNames(profiles)\n e.syncAvatars(false)');
   }
   if (file === 'internal/messaging/files.go') {
-    change('type Attachment struct {', 'type Attachment struct {\n Image bool');
+    change('type Attachment struct {', 'type Attachment struct {\n Image bool\n prepared *PreparedPhoto');
     change(
       'func (c *Client) uploadFile(file *Attachment, metadata map[string]string) ([]byte, error) {',
       `func (c *Client) uploadFile(file *Attachment, metadata map[string]string) ([]byte, error) {
@@ -829,9 +833,16 @@ function patchFile(file, source) {
       'kind := toType(chat)',
       `var photo *photoUpload
  if file != nil && file.Image {
-   var err error
-   photo, err = preparePhoto(file.Data)
-   if err != nil { return nil, err }
+   prepared := file.prepared
+   if prepared == nil {
+     var err error
+     prepared, err = PreparePhoto(file.Data)
+     if err != nil { return nil, err }
+   }
+   photo = prepared.info
+   owned := *file
+   owned.Data, owned.prepared = prepared.data, prepared
+   file = &owned
  }
  kind := toType(chat)`,
     );
