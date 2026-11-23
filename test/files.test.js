@@ -214,6 +214,102 @@ test('upload acknowledgement completes even when the pending frame is coalesced'
   assert.equal(backend.listenerCount('failure'), 0);
 });
 
+test('coalesced attachment failures report their correlated validation error immediately', async (t) => {
+  const dir = await directory(t);
+  const file = path.join(dir, 'invalid.png');
+  await writeFile(file, 'not an image');
+  const backend = new EventEmitter();
+  let calls = 0;
+  backend.command = (command) => {
+    calls++;
+    assert.equal(command.action, 'attach');
+    backend.emit('state', {
+      ...state,
+      fileStatus: 'idle',
+      fileResult: {
+        requestId: 'stale',
+        action: 'attach',
+        status: 'error',
+        note: 'stale error',
+      },
+    });
+    assert.equal(backend.listenerCount('state'), 1, 'unrelated result must not finish this request');
+    backend.emit('state', {
+      ...state,
+      fileStatus: 'idle',
+      fileResult: {
+        requestId: command.requestId,
+        action: 'attach',
+        status: 'error',
+        note: 'Choose a valid PNG/JPEG photo',
+      },
+    });
+  };
+  await assert.rejects(uploadFiles(backend, context, [file], { image: true, timeoutMs: 1000 }), /valid PNG\/JPEG/);
+  assert.equal(calls, 1);
+  assert.equal(backend.listenerCount('state'), 0);
+});
+
+test('correlated attachment success works without a pending frame and ignores stale snapshots', async (t) => {
+  const dir = await directory(t);
+  const file = path.join(dir, 'file');
+  await writeFile(file, 'data');
+  const backend = new EventEmitter();
+  backend.command = (command) => {
+    if (command.action === 'attach') {
+      backend.emit('state', { ...state, attachment: { id: 'stale' }, fileResult: null });
+      assert.equal(backend.listenerCount('state'), 1);
+      backend.emit('state', {
+        ...state,
+        attachment: { id: 'prepared' },
+        fileResult: {
+          requestId: command.requestId,
+          action: 'attach',
+          status: 'ok',
+        },
+      });
+    } else {
+      assert.equal(command.attachmentId, 'prepared');
+      backend.emit('state', { ...state, sendStatus: 'idle', sentAttachmentId: 'prepared', fileResult: null });
+    }
+  };
+  await uploadFiles(backend, context, [file], { timeoutMs: 1000 });
+});
+
+for (const outcome of ['ok', 'error']) {
+  test(`coalesced download result completes without a pending frame: ${outcome}`, async (t) => {
+    const dir = await directory(t);
+    const backend = new EventEmitter();
+    backend.command = (command) => {
+      backend.emit('state', {
+        ...state,
+        fileStatus: 'idle',
+        fileResult: {
+          requestId: 'unrelated',
+          action: 'download',
+          status: 'ok',
+        },
+      });
+      assert.equal(backend.listenerCount('state'), 1);
+      if (outcome === 'ok') writeFileSync(fileURLToPath(command.url), 'downloaded');
+      backend.emit('state', {
+        ...state,
+        fileStatus: 'idle',
+        fileResult: {
+          requestId: command.requestId,
+          action: 'download',
+          status: outcome,
+          note: 'Download failed safely',
+        },
+      });
+    };
+    const saved = downloadFile(backend, context, { id: '1', fileName: 'saved.txt' }, { directory: dir });
+    if (outcome === 'ok') assert.equal(await readFile(await saved, 'utf8'), 'downloaded');
+    else await assert.rejects(saved, /Download failed safely/);
+    assert.equal(backend.listenerCount('state'), 0);
+  });
+}
+
 test('upload timeout releases listeners, stops the queue, and never replays a send', async (t) => {
   const dir = await directory(t);
   const files = [path.join(dir, 'one'), path.join(dir, 'two')];

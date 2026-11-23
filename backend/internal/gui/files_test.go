@@ -11,6 +11,64 @@ import (
 )
 
 func fileURL(path string) string { return (&url.URL{Scheme: "file", Path: path}).String() }
+
+func TestFileResultsSurviveWithoutPendingSnapshots(t *testing.T) {
+	e := NewEngine(Operations{}, nil)
+	defer e.Close()
+	e.Handle(Command{Action: "mode", Mode: "demo"})
+	v := e.View()
+	c := Command{Action: "attach", ID: v.SelectedID, Session: v.Session, Selection: v.Selection, RequestID: "prepare-one"}
+	file := filepath.Join(t.TempDir(), "upload.txt")
+	if err := os.WriteFile(file, []byte("content"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	c.URL = fileURL(file)
+	e.Handle(c)
+	e.Wait()
+	v = e.View()
+	if v.FileResult == nil || v.FileResult.RequestID != c.RequestID || v.FileResult.Action != "attach" ||
+		v.FileResult.Status != "ok" || v.Attachment == nil {
+		t.Fatalf("missing prepare result: %#v", v.FileResult)
+	}
+	c.RequestID = "prepare-two"
+	c.URL = fileURL(file + "-missing")
+	e.Handle(c)
+	e.Wait()
+	v = e.View()
+	if v.FileResult == nil || v.FileResult.RequestID != c.RequestID || v.FileResult.Status != "error" || v.FileResult.Note == "" {
+		t.Fatalf("missing preparation failure: %#v", v.FileResult)
+	}
+	// Only the final result is needed by the consumer, even if pending was lost.
+	for _, m := range v.Messages {
+		if m.Downloadable {
+			c.MessageID = m.ID
+			break
+		}
+	}
+	if c.MessageID == "" {
+		t.Fatal("demo download fixture missing")
+	}
+	c.Action, c.RequestID, c.URL = "download", "download-one", fileURL(filepath.Join(t.TempDir(), "saved.png"))
+	e.Handle(c)
+	e.Wait()
+	v = e.View()
+	if v.FileResult == nil || v.FileResult.RequestID != c.RequestID || v.FileResult.Action != "download" || v.FileResult.Status != "ok" {
+		t.Fatalf("missing download result: %#v", v.FileResult)
+	}
+	// Reusing an existing destination must report failure, never false success.
+	c.RequestID = "download-two"
+	e.Handle(c)
+	e.Wait()
+	v = e.View()
+	if v.FileResult == nil || v.FileResult.RequestID != c.RequestID || v.FileResult.Status != "error" {
+		t.Fatalf("missing download failure: %#v", v.FileResult)
+	}
+	e.Handle(Command{Action: "mode", Mode: "live"})
+	if e.View().FileResult != nil {
+		t.Fatal("file result survived identity reset")
+	}
+}
+
 func TestAttachmentSendPreservesTextDraft(t *testing.T) {
 	e := NewEngine(Operations{}, nil)
 	defer e.Close()

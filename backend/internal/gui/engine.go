@@ -18,6 +18,7 @@ var fullID = regexp.MustCompile(`^(?:[uUcCrR][A-Za-z0-9_-]{43}|[ucr][0-9a-f]{32}
 var numericID = regexp.MustCompile(`^[1-9][0-9]{0,19}$`)
 
 type Command struct {
+	RequestID    string    `json:"requestId,omitempty"`
 	Mentions     []Mention `json:"mentions,omitempty"`
 	MessageIDs   []string  `json:"messageIds,omitempty"`
 	Action       string    `json:"action"`
@@ -152,6 +153,7 @@ type PhotoThumbnail struct {
 	Data   string `json:"data"`
 }
 type View struct {
+	FileResult       *FileResult               `json:"fileResult"`
 	AuthDiagnostic   string                    `json:"authDiagnostic"`
 	Members          []Contact                 `json:"members"`
 	MembersStatus    string                    `json:"membersStatus"`
@@ -424,6 +426,7 @@ func (e *Engine) available(c Command) bool {
 	return e.current(c) && e.state.Status == "ready" && !e.state.Busy && !e.pending && !e.mutationActive && !e.fileBusy
 }
 func (e *Engine) resetIdentity() {
+	e.state.FileResult = nil
 	e.state.AuthDiagnostic = ""
 	e.state.Members = nil
 	e.state.MembersStatus = "idle"

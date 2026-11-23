@@ -12,6 +12,26 @@ import (
 
 var reactions = []string{"like", "love", "laugh", "surprise", "sad", "angry"}
 
+// FileResult survives coalesced snapshots. Request IDs disambiguate completion
+// from stale idle states, unrelated previews, and previous transfer results.
+type FileResult struct {
+	RequestID string `json:"requestId"`
+	Action    string `json:"action"`
+	Status    string `json:"status"`
+	Note      string `json:"note,omitempty"`
+}
+
+func (e *Engine) finishFile(c Command, ok bool, note string) {
+	if c.RequestID == "" || len(c.RequestID) > 128 || (c.Action != "attach" && c.Action != "download") {
+		return
+	}
+	status := "error"
+	if ok {
+		status = "ok"
+	}
+	e.state.FileResult = &FileResult{RequestID: c.RequestID, Action: c.Action, Status: status, Note: note}
+}
+
 func (e *Engine) target(c Command) *Message {
 	if !numericID.MatchString(c.MessageID) {
 		return nil
@@ -46,6 +66,9 @@ func (e *Engine) feature(c Command) {
 		return
 	}
 	if !e.available(c) {
+		if e.current(c) {
+			e.finishFile(c, false, "Transfer unavailable while another operation is active")
+		}
 		return
 	}
 	if c.Action == "reply-cancel" {
@@ -59,6 +82,7 @@ func (e *Engine) feature(c Command) {
 	}
 	target := e.target(c)
 	if target == nil {
+		e.finishFile(c, false, "Select a downloadable message")
 		return
 	}
 	if c.Action == "reply" {
@@ -77,6 +101,8 @@ func (e *Engine) feature(c Command) {
 	if c.Action == "download" || c.Action == "preview" {
 		if target.Downloadable {
 			e.download(c)
+		} else {
+			e.finishFile(c, false, "Selected message has no downloadable attachment")
 		}
 		return
 	}
@@ -153,6 +179,7 @@ func (e *Engine) attach(c Command) {
 		return
 	}
 	e.fileBusy = true
+	e.state.FileResult = nil
 	e.state.FileStatus = "pending"
 	e.state.SendNote = ""
 	epoch := e.epoch
@@ -174,11 +201,13 @@ func (e *Engine) attach(c Command) {
 			e.state.Attachment = file
 			e.state.SendNote = ""
 		}
+		e.finishFile(c, err == nil, e.state.SendNote)
 		e.publish()
 	})
 }
 func (e *Engine) download(c Command) {
 	if e.fileBusy || e.ops.Download == nil && e.state.Mode != "demo" {
+		e.finishFile(c, false, "Download unavailable")
 		return
 	}
 	targetFD, targetName := -1, ""
@@ -187,10 +216,14 @@ func (e *Engine) download(c Command) {
 		targetFD, targetName, err = openParent(c.URL)
 		if err != nil {
 			e.state.SendNote = "保存先を確認してください"
+			e.finishFile(c, false, e.state.SendNote)
 			return
 		}
 	}
 	e.fileBusy = true
+	if c.Action == "download" {
+		e.state.FileResult = nil
+	}
 	e.state.FileStatus = "pending"
 	e.state.SendNote = ""
 	ctx, cancel := context.WithTimeout(e.resourceCtx, 130*time.Second)
@@ -239,6 +272,9 @@ func (e *Engine) download(c Command) {
 		}
 		e.mu.Lock()
 		defer e.mu.Unlock()
+		if err == nil {
+			err = ctx.Err()
+		}
 		cancel()
 		if e.disposed || e.epoch != epoch {
 			return
@@ -263,6 +299,7 @@ func (e *Engine) download(c Command) {
 		} else if c.Action == "download" {
 			e.state.SendNote = "ファイルを保存しました"
 		}
+		e.finishFile(c, err == nil, e.state.SendNote)
 		e.publish()
 	})
 }

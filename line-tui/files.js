@@ -5,6 +5,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { homedir, tmpdir } = require('node:os');
 const { pathToFileURL } = require('node:url');
+const { randomUUID } = require('node:crypto');
 
 function run(file, args, signal) {
   return new Promise((resolve) => {
@@ -159,6 +160,13 @@ function waitForState(backend, context, signal, command, check, timeoutMs = 1350
   });
 }
 
+function fileCompletion(view, command) {
+  const result = view.fileResult;
+  if (result?.requestId !== command.requestId || result.action !== command.action) return false;
+  if (result.status === 'error') throw new Error(result.note || 'File transfer failed.');
+  return result.status === 'ok';
+}
+
 async function uploadFiles(
   backend,
   context,
@@ -179,7 +187,7 @@ async function uploadFiles(
     const label = `Uploading ${index + 1}/${files.length}: ${path.basename(file)}`;
     onProgress(`${label} · Browse normally · Esc stops remaining files`);
     let attaching = false;
-    const command = { action: 'attach', ...context, url: pathToFileURL(file).href };
+    const command = { action: 'attach', ...context, url: pathToFileURL(file).href, requestId: randomUUID() };
     if (image) command.mode = 'image';
     const attachment = await waitForState(
       backend,
@@ -187,6 +195,12 @@ async function uploadFiles(
       signal,
       command,
       (view) => {
+        if (Object.hasOwn(view, 'fileResult')) {
+          if (!fileCompletion(view, command)) return null;
+          if (!view.attachment) throw new Error('Attachment preparation returned no file.');
+          return view.attachment;
+        }
+        // Compatibility with older backends without correlated file results.
         if (view.fileStatus === 'pending') attaching = true;
         if (view.attachment) return view.attachment;
         if (attaching && view.fileStatus === 'idle' && view.sendNote) throw new Error(view.sendNote);
@@ -246,18 +260,20 @@ async function downloadFile(backend, context, message, { signal, directory, onPr
     }
   }
   let pending = false;
-  await waitForState(
-    backend,
-    context,
-    signal,
-    { action: 'download', ...context, messageId: message.id, url: pathToFileURL(file).href },
-    (view) => {
-      if (view.fileStatus === 'pending') pending = true;
-      const total = view.downloadTotal ? ` / ${view.downloadTotal}` : '';
-      onProgress(`Downloading… ${view.downloadReceived || 0}${total} bytes · Esc cancel`);
-      return pending && view.fileStatus === 'idle';
-    },
-  );
+  const command = {
+    action: 'download',
+    ...context,
+    messageId: message.id,
+    url: pathToFileURL(file).href,
+    requestId: randomUUID(),
+  };
+  await waitForState(backend, context, signal, command, (view) => {
+    if (view.fileStatus === 'pending') pending = true;
+    const total = view.downloadTotal ? ` / ${view.downloadTotal}` : '';
+    onProgress(`Downloading… ${view.downloadReceived || 0}${total} bytes · Esc cancel`);
+    if (Object.hasOwn(view, 'fileResult')) return fileCompletion(view, command);
+    return pending && view.fileStatus === 'idle';
+  });
   await fs.access(file);
   return file;
 }
