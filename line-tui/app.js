@@ -44,7 +44,14 @@ async function createApp(
     flexDirection: 'column',
     backgroundColor: theme.background,
   });
-  const header = new Text(renderer, { content: ' LINE  ·  Connecting…', fg: green, height: 1 });
+  const header = new Text(renderer, {
+    content: ' LINE  ·  Connecting…',
+    fg: green,
+    height: 1,
+    width: '100%',
+    wrapMode: 'none',
+    truncate: true,
+  });
   const body = new Box(renderer, { flexDirection: 'row', flexGrow: 1, minHeight: 0 });
   const chats = new ScrollBox(renderer, {
     width: '30%',
@@ -54,6 +61,7 @@ async function createApp(
     titleColor: theme.foreground,
     scrollbarOptions: theme.scrollbar,
     title: ' Chats ',
+    onMouseDown: (event) => event.preventDefault(),
   });
   let chatRows = [];
   let chatRowsKey = '';
@@ -68,6 +76,7 @@ async function createApp(
     borderColor: theme.border,
     titleColor: theme.foreground,
     title: ' Messages ',
+    onMouseDown: (event) => event.preventDefault(),
   });
   const history = new ScrollBox(renderer, {
     id: 'line-history',
@@ -89,6 +98,8 @@ async function createApp(
   let pendingHistoryPage = 0;
   let openAtBottom = false;
   let visiblePhotosKey = '';
+  let visibleReadKey = '';
+  let terminalFocused = true;
   root.renderBefore = () => {
     if (openAtBottom) {
       history.scrollTo(history.scrollHeight);
@@ -132,7 +143,7 @@ async function createApp(
   const hintsVisible = loadHintsVisible(hintsFile);
   const hints = new Text(renderer, {
     id: 'line-hints',
-    content: ' CHATS · j/k move · Enter open · ^E cache · ^K clear · ^P preview · ^H hints · ? help',
+    content: ' CHATS · ^E cache · ^K clear · ^P preview · ^O read · ^M mute · ^H hints · ? help',
     fg: green,
     height: hintsVisible ? 1 : 0,
     visible: hintsVisible,
@@ -278,6 +289,7 @@ async function createApp(
   });
   helpScroll.add(
     new Text(renderer, {
+      id: 'line-keybind-text',
       content: [
         ' NAVIGATION',
         ' j/k or Up/Down          Select a chat or message',
@@ -302,7 +314,10 @@ async function createApp(
         ' l (on media)            Open image / play video',
         ' Ctrl+S                  Save selected attachment',
         ' Ctrl+T                  Upload files',
+        ' Ctrl+I                  Upload PNG/JPEG as photos (enhanced keyboard)',
         ' Ctrl+P                  Toggle automatic image previews',
+        ' Ctrl+O                  Enable / disable automatic read receipts',
+        ' Ctrl+M                  Mute / unmute selected chat on LINE',
         ' Ctrl+E                  Enable / disable disk media cache',
         ' Ctrl+K                  Clear saved media',
         '',
@@ -310,6 +325,7 @@ async function createApp(
         ' Ctrl+H                  Hide / show bottom hints',
         ' ?                       Open / close this help',
         ' Ctrl+R                  Refresh',
+        ' Ctrl+N                  Test desktop notification (live mode)',
         ' Ctrl+L                  Start / retry login',
         ' Ctrl+Y / Ctrl+X         Confirm / cancel login',
         ' Ctrl+C                  Quit',
@@ -350,6 +366,7 @@ async function createApp(
   let videoController;
   let videoControls;
   let transferController;
+  let transferPicking = false;
   let transferScope;
   let transferNote = '';
   let pathPrompt;
@@ -428,11 +445,11 @@ async function createApp(
       history: `SCROLL [${messageCursor + 1}/${messageRows.length}] · j/k`,
       insert: 'INSERT · Enter · Esc',
     };
-    const controls = '^E cache · ^K clear · ^P preview · ^H hints · ? help';
+    const controls = '^E cache · ^K clear · ^P preview · ^O read · ^M mute · ^H hints · ? help';
     hints.content =
-      renderer.width < 100
-        ? ` ${shortHelp[mode]} · ${controls}`
-        : ` ${help[mode]} · ^S save · ^T upload · ${controls} · ^C quit`;
+      renderer.width < 140
+        ? ` ${renderer.width < 110 ? shortHelp[mode].split(' · ')[0] : shortHelp[mode]} · ${controls}`
+        : ` ${help[mode]} · ^S save · ^T file · ^I image · ${controls} · ^C quit`;
     if (mode === 'history') {
       if (previousMode === 'chats' && messageRows[messageCursor]) {
         if (messageCursor === messageRows.length - 1) history.scrollTo(history.scrollHeight);
@@ -468,7 +485,7 @@ async function createApp(
       status.content = clean(error.message);
     }
   });
-  const startTransfer = async (upload) => {
+  const startTransfer = async (upload, image = false) => {
     if (
       transferController ||
       !view.selectedId ||
@@ -491,6 +508,7 @@ async function createApp(
     const previousMode = mode;
     const replyTo = view.reply?.id || '';
     transferController = new AbortController();
+    transferPicking = upload;
     const { signal } = transferController;
     input.blur();
     // eslint-disable-next-line no-use-before-define
@@ -504,13 +522,15 @@ async function createApp(
     };
     try {
       if (upload) {
-        progress('Choose files to upload…');
+        progress(image ? 'Choose PNG/JPEG images to upload…' : 'Choose files to upload…');
         let files = await chooseFiles(renderer, signal);
         signal.throwIfAborted();
         files ??= await askPaths();
         signal.throwIfAborted();
+        transferPicking = false;
+        focus(previousMode === 'insert' ? 'history' : mode);
         if (files.length) {
-          await uploadFiles(backend, scope, files, { signal, replyTo, onProgress: progress });
+          await uploadFiles(backend, scope, files, { signal, replyTo, image, onProgress: progress });
           progress(`Uploaded ${files.length} file(s).`);
         } else {
           progress('Upload canceled.');
@@ -530,9 +550,11 @@ async function createApp(
       backend.command({ action: 'attach-cancel', ...scope });
     } finally {
       closePaths([]);
+      const restorePickerFocus = transferPicking;
+      transferPicking = false;
       transferController = undefined;
       transferScope = undefined;
-      if (!disposed) focus(previousMode);
+      if (!disposed) focus(restorePickerFocus ? previousMode : mode);
     }
   };
   const revealChat = () => {
@@ -556,6 +578,15 @@ async function createApp(
     if (!syncing && !failed) mentionPicker.update();
   };
   chats.viewport.onSizeChange = revealChat;
+  const mouseSelectionBlocked = () =>
+    failed ||
+    view.busy ||
+    view.login?.active ||
+    (view.sendStatus === 'pending' && !view.uploadPending) ||
+    helpView.visible ||
+    Boolean(transferPicking || pathPrompt || expandedMessageId || videoController || linkChoices.length) ||
+    stickerPicker.active ||
+    mentionPicker.active;
   const paintChats = () => {
     const key = JSON.stringify(view.chats);
     if (key !== chatRowsKey) {
@@ -569,9 +600,19 @@ async function createApp(
           flexShrink: 0,
           marginBottom: 1,
           onSizeChange: revealChat,
+          onMouseDown: (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.button !== 0 || mouseSelectionBlocked()) return;
+            flushDraft();
+            cursor = index;
+            backend.command({ action: 'select', id: chat.id });
+            focus('chats');
+            paintChats();
+          },
         });
         const marker = new Text(renderer, { width: 2, flexShrink: 0, content: ' ', fg: green });
-        const name = `${clean(chat.name)}${chat.unread ? ` (${chat.unread})` : ''}`;
+        const name = `${clean(chat.name)}${chat.muted ? ' ' : ''}${chat.unread ? ` (${chat.unread})` : ''}`;
         const preview = clean(chat.preview).replace(/\n/g, ' ').slice(0, 70);
         row.add(marker);
         const label = new Text(renderer, {
@@ -701,7 +742,58 @@ async function createApp(
     visiblePhotosKey = key;
     backend.command({ action: 'photos-visible', ...context(), messageIds: ids });
   };
-  root.renderAfter = requestVisiblePhotos;
+  const requestVisibleRead = () => {
+    if (disposed || failed || view.mode !== 'live' || !view.selectedId) return;
+    const active =
+      terminalFocused &&
+      view.markReadEnabled !== false &&
+      mode !== 'chats' &&
+      view.historyStatus === 'ready' &&
+      ['ready', 'offline'].includes(view.status) &&
+      !view.login?.active &&
+      !helpView.visible &&
+      !expandedMessageId &&
+      !videoController &&
+      !transferController &&
+      !stickerPicker.active &&
+      !linkChoices.length;
+    const visible = active
+      ? messageRows.filter(
+          ({ row }) =>
+            row.height > 0 &&
+            row.y < history.viewport.y + history.viewport.height &&
+            row.y + row.height > history.viewport.y,
+        )
+      : [];
+    const ids = visible.map(({ message }) => message.id).filter((id) => /^[1-9][0-9]{0,19}$/.test(id));
+    ids.sort((a, b) => a.length - b.length || a.localeCompare(b));
+    const target = visible.some(({ message }) => !message.own) ? ids.at(-1) : '';
+    if (!target) {
+      if (visibleReadKey) {
+        visibleReadKey = '';
+        backend.command({ action: 'read-visible', ...context(), focused: false });
+      }
+      return;
+    }
+    const key = JSON.stringify([view.session, view.selectedId, view.selection, target]);
+    if (key === visibleReadKey) return;
+    visibleReadKey = key;
+    backend.command({ action: 'read-visible', ...context(), focused: true, messageId: target });
+  };
+  const onTerminalFocus = () => {
+    terminalFocused = true;
+    renderer.requestRender();
+  };
+  const onTerminalBlur = () => {
+    terminalFocused = false;
+    requestVisibleRead();
+  };
+  renderer.on('focus', onTerminalFocus);
+  renderer.on('blur', onTerminalBlur);
+  root.renderAfter = () => {
+    requestVisiblePhotos();
+    requestVisibleRead();
+  };
   const onState = (next) => {
     if (failed) return;
     if (
@@ -742,7 +834,8 @@ async function createApp(
     const mediaInfo =
       view.account?.id && view.mode === 'live'
         ? ` · cached ${view.mediaCacheEnabled ? 'on' : 'off'} ${Math.ceil((view.mediaCacheBytes || 0) / 1048576)} MiB` +
-          ` · preview: ${view.autoImages ? 'auto' : 'selected'}`
+          ` · preview: ${view.autoImages ? 'auto' : 'selected'}` +
+          ` · mark read: ${view.markReadEnabled !== false ? 'on' : 'off'}`
         : '';
     header.content =
       ` LINE${view.mode === 'demo' ? ' · DEMO' : ''}  ·  ${clean(view.account?.name)} ` +
@@ -787,6 +880,17 @@ async function createApp(
           justifyContent: message.own ? 'flex-end' : 'flex-start',
           flexShrink: 0,
           marginBottom: 1,
+          onMouseDown: (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            if (event.button !== 0 || mouseSelectionBlocked()) return;
+            flushDraft();
+            // Avoid focus()'s keyboard-only jump to the final message.
+            if (mode === 'chats') mode = 'history';
+            messageCursor = index;
+            openAtBottom = false;
+            focus('history');
+          },
         });
         const marker = new Text(renderer, {
           id: `line-message-marker-${index}`,
@@ -867,7 +971,10 @@ async function createApp(
       ? `Reply to ${clean(view.reply.sender)}: ${replyText} · Esc in scroll mode cancels\n`
       : '';
     const statusText = clean(view.statusText).replace(/\s*\n\s*/g, ' · ');
-    const note = clean(view.sendNote || view.historyNote).replace(/\s*\n\s*/g, ' · ');
+    const note = [view.notificationNote, view.readNote, view.sendNote || view.historyNote]
+      .filter(Boolean)
+      .map((text) => clean(text).replace(/\s*\n\s*/g, ' · '))
+      .join(' · ');
     status.content = ` ${replyHint}${[statusText, note, view.sendStatus === 'pending' ? 'Sending…' : '']
       .filter(Boolean)
       .join(' · ')}`;
@@ -965,6 +1072,26 @@ async function createApp(
       }
       return;
     }
+    if (key.ctrl && name === 'n') {
+      key.preventDefault?.();
+      if (!failed && view.mode === 'live') backend.command({ action: 'notification-test' });
+      return;
+    }
+    if (key.ctrl && name === 'o') {
+      key.preventDefault?.();
+      if (!failed && view.mode === 'live' && view.account?.id) {
+        backend.command({ action: 'mark-read-toggle' });
+      }
+      return;
+    }
+    if (key.ctrl && name === 'm') {
+      key.preventDefault?.();
+      if (!failed && view.mode === 'live' && !transferController) {
+        const id = mode === 'chats' ? view.chats[cursor]?.id : view.selectedId;
+        if (id) backend.command({ action: 'chat-mute-toggle', ...context(), id });
+      }
+      return;
+    }
     if (key.ctrl && name === 'h' && mode !== 'insert' && !transferController) {
       key.preventDefault?.();
       hints.visible = !hints.visible;
@@ -974,7 +1101,7 @@ async function createApp(
       }
       return;
     }
-    if (helpKey(key, name) && mode !== 'insert' && !transferController) {
+    if (helpKey(key, name) && mode !== 'insert' && !transferPicking) {
       key.preventDefault?.();
       helpScroll.scrollTo(0);
       helpView.visible = true;
@@ -996,10 +1123,21 @@ async function createApp(
         key.preventDefault?.();
         closePaths([]);
         transferController.abort();
-      } else if (!pathPrompt) {
-        key.preventDefault?.();
+        return;
       }
-      return;
+      if (transferPicking) {
+        if (!pathPrompt) key.preventDefault?.();
+        return;
+      }
+      // Transfers own the send slot, not the entire interface. Keep browsing
+      // available, but don't start another mutation or media operation.
+      const navigation = key.ctrl
+        ? ['b', 'f', 'u', 'd'].includes(name)
+        : ['tab', 'pageup', 'pagedown', 'j', 'k', 'h', 'l', 'g', 'G', 'up', 'down', 'return'].includes(name);
+      if (!navigation || key.meta) {
+        key.preventDefault?.();
+        return;
+      }
     }
     if (key.ctrl && ['e', 'k'].includes(name)) {
       if (!failed && view.mode === 'live' && view.account?.id) {
@@ -1007,17 +1145,17 @@ async function createApp(
       }
       return;
     }
-    transferNote = '';
+    if (!transferController) transferNote = '';
     if (
       key.ctrl &&
-      ['s', 't'].includes(name) &&
+      ['s', 't', 'i'].includes(name) &&
       !stickerPicker.active &&
       !expandedMessageId &&
       !videoController &&
       !linkChoices.length
     ) {
       key.preventDefault?.();
-      void startTransfer(name === 't');
+      void startTransfer(name !== 's', name === 'i');
       return;
     }
     if (key.ctrl && name.toLowerCase() === 'l') {
@@ -1311,6 +1449,8 @@ async function createApp(
     onState,
     dispose: () => {
       disposed = true;
+      renderer.off('focus', onTerminalFocus);
+      renderer.off('blur', onTerminalBlur);
       transferController?.abort();
       closePaths([]);
       stickerPicker.dispose();

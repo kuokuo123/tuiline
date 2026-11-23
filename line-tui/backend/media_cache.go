@@ -305,23 +305,31 @@ func (c *mediaCache) active() bool {
 // Automatic thumbnails are a viewing preference, independent of whether disk
 // caching is enabled. A missing setting means enabled.
 func (c *mediaCache) autoImages() bool {
+	return c.preferenceEnabled("auto-images-off")
+}
+
+func (c *mediaCache) preferenceEnabled(flag string) bool {
 	if c == nil {
 		return true
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	path := filepath.Join(c.dir, "auto-images-off")
+	path := filepath.Join(c.dir, flag)
 	info, err := os.Lstat(path)
 	return err != nil || !info.Mode().IsRegular() || info.Mode().Perm() != 0600
 }
 
 func (c *mediaCache) setAutoImages(enabled bool) bool {
+	return c.setPreferenceEnabled("auto-images-off", enabled)
+}
+
+func (c *mediaCache) setPreferenceEnabled(flag string, enabled bool) bool {
 	if c == nil {
 		return false
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	path := filepath.Join(c.dir, "auto-images-off")
+	path := filepath.Join(c.dir, flag)
 	if enabled {
 		err := os.Remove(path)
 		return err == nil || errors.Is(err, os.ErrNotExist)

@@ -179,13 +179,171 @@ for (const uncertain of [false, true]) {
       }
     };
     const result = uploadFiles(backend, context, files);
-    if (uncertain) await assert.rejects(result, /uncertain/);
+    if (uncertain) await assert.rejects(result, /Delivery unconfirmed/);
     else await result;
     assert.deepEqual(
       commands.map((command) => command.action),
       uncertain ? ['attach', 'send'] : ['attach', 'send', 'attach', 'send'],
     );
     assert.equal(backend.listenerCount('state'), 0);
+  });
+}
+
+test('upload acknowledgement completes even when the pending frame is coalesced', async (t) => {
+  const dir = await directory(t);
+  const files = [path.join(dir, 'one'), path.join(dir, 'two')];
+  await Promise.all(files.map((file) => writeFile(file, 'data')));
+  const backend = new EventEmitter();
+  let sends = 0;
+  let attachmentId;
+  backend.command = (command) => {
+    if (command.action === 'attach') {
+      attachmentId = `attachment-${sends}`;
+      backend.emit('state', { ...state, attachment: { id: attachmentId } });
+    }
+    if (command.action === 'send') {
+      sends++;
+      // Neither a stale idle state nor an unrelated receipt is confirmation.
+      backend.emit('state', { ...state, sendStatus: 'idle', sentAttachmentId: 'unrelated' });
+      backend.emit('state', { ...state, sendStatus: 'idle', sentAttachmentId: attachmentId });
+    }
+  };
+  await uploadFiles(backend, context, files, { timeoutMs: 1000 });
+  assert.equal(sends, 2);
+  assert.equal(backend.listenerCount('state'), 0);
+  assert.equal(backend.listenerCount('failure'), 0);
+});
+
+test('upload timeout releases listeners, stops the queue, and never replays a send', async (t) => {
+  const dir = await directory(t);
+  const files = [path.join(dir, 'one'), path.join(dir, 'two')];
+  await Promise.all(files.map((file) => writeFile(file, 'data')));
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => {
+    commands.push(command);
+    if (command.action === 'attach') backend.emit('state', { ...state, attachment: { id: 'attachment' } });
+    if (command.action === 'send') backend.emit('state', { ...state, sendStatus: 'pending' });
+  };
+  await assert.rejects(uploadFiles(backend, context, files, { timeoutMs: 15 }), /Delivery unconfirmed/);
+  backend.emit('state', { ...state, sendStatus: 'idle', sentAttachmentId: 'attachment' });
+  assert.deepEqual(
+    commands.map((command) => command.action),
+    ['attach', 'send'],
+  );
+  assert.equal(backend.listenerCount('state'), 0);
+  assert.equal(backend.listenerCount('failure'), 0);
+});
+
+test('photo upload failures retain the backend safe operation stage', async (t) => {
+  const dir = await directory(t);
+  const file = path.join(dir, 'photo.png');
+  await writeFile(file, 'validated by backend');
+  const backend = new EventEmitter();
+  let sends = 0;
+  const note = 'Delivery unconfirmed: upload original (plain): request failed; check LINE before retrying';
+  backend.command = (command) => {
+    if (command.action === 'attach') backend.emit('state', { ...state, attachment: { id: 'photo' } });
+    if (command.action === 'send') {
+      sends++;
+      backend.emit('state', { ...state, sendStatus: 'uncertain', sendNote: note });
+    }
+  };
+  await assert.rejects(uploadFiles(backend, context, [file, file], { image: true }), { message: note });
+  assert.equal(sends, 1);
+  assert.equal(backend.listenerCount('state'), 0);
+});
+
+for (const outcome of ['success', 'uncertain', 'cancel', 'navigate']) {
+  test(`photo uploads leave navigation responsive during and after ${outcome}`, { timeout: 5000 }, async (t) => {
+    const { createTestRenderer } = await import('@opentui/core/testing');
+    const { createApp } = require('../line-tui/app');
+    const dir = await directory(t);
+    const file = path.join(dir, 'photo.png');
+    await writeFile(file, 'image validated by backend');
+    const setup = await createTestRenderer({ width: 110, height: 24, kittyKeyboard: true });
+    const backend = new EventEmitter();
+    const started = Promise.withResolvers();
+    const commands = [];
+    let frame = {
+      ...state,
+      status: 'ready',
+      sendStatus: 'idle',
+      chats: [
+        { id: context.id, name: 'First' },
+        { id: 'other', name: 'Other' },
+      ],
+      messages: Array.from({ length: 30 }, (_, index) => ({ id: `${index + 1}`, text: `Message ${index}` })),
+    };
+    backend.command = (command) => {
+      commands.push(command);
+      if (command.action === 'attach') {
+        frame = { ...frame, attachment: { id: 'photo' } };
+        backend.emit('state', frame);
+      }
+      if (command.action === 'send') {
+        frame = { ...frame, sendStatus: 'pending', uploadPending: true };
+        backend.emit('state', frame);
+        started.resolve();
+      }
+      if (command.action === 'select') {
+        frame = { ...frame, selectedId: command.id, selection: frame.selection + 1 };
+        backend.emit('state', frame);
+      }
+    };
+    backend.close = () => {};
+    const app = await createApp(setup.renderer, backend, {
+      pickFiles: async () => (outcome === 'success' ? [file] : [file, file]),
+      hintsFile: path.join(dir, 'preferences', 'hidden'),
+    });
+    t.after(() => {
+      app.dispose();
+      setup.renderer.destroy();
+    });
+    backend.emit('state', frame);
+    setup.mockInput.pressKey('l');
+    setup.mockInput.pressKey('i', { ctrl: true });
+    await started.promise;
+    await setup.renderOnce();
+    const history = setup.renderer.root.findDescendantById('line-history');
+    const before = history.scrollTop;
+    setup.mockInput.pressKey('k');
+    setup.mockInput.pressKey('b', { ctrl: true });
+    await setup.renderOnce();
+    assert.ok(history.scrollTop < before, 'upload must not block scrolling');
+    const hintText = () =>
+      setup.renderer.root
+        .findDescendantById('line-hints')
+        .content.chunks.map((chunk) => chunk.text)
+        .join('');
+    setup.mockInput.pressKey('h');
+    assert.match(hintText(), /CHATS/);
+    setup.mockInput.pressKey('t', { ctrl: true });
+    assert.equal(commands.filter((command) => command.action === 'attach').length, 1, 'no overlapping upload');
+    if (outcome === 'navigate') {
+      setup.mockInput.pressKey('j');
+      assert.equal(frame.selectedId, 'other');
+    } else if (outcome === 'cancel') {
+      setup.mockInput.pressEscape();
+    } else {
+      frame = {
+        ...frame,
+        uploadPending: false,
+        sendStatus: outcome === 'success' ? 'idle' : 'uncertain',
+        attachment: outcome === 'success' ? undefined : { id: 'photo' },
+        sentAttachmentId: outcome === 'success' ? 'photo' : '',
+      };
+      backend.emit('state', frame);
+    }
+    await new Promise((resolve) => {
+      setImmediate(resolve);
+    });
+    await setup.renderOnce();
+    assert.match(hintText(), /CHATS/, 'completion must not restore stale conversation focus');
+    setup.mockInput.pressKey('l');
+    assert.match(hintText(), /SCROLL/);
+    assert.equal(commands.filter((command) => command.action === 'send').length, 1, 'no duplicate or queued send');
+    if (outcome === 'uncertain') assert.match(setup.captureCharFrame(), /Delivery unconfirmed/);
   });
 }
 

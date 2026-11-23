@@ -69,13 +69,18 @@ does not publish one. The source-build instructions above work without npm publi
 | PageUp/PageDown          | Scroll loaded history                                           |
 | g then x                 | Open links in the marked message; pick a link if several        |
 | Ctrl+R                   | Refresh                                                         |
+| Ctrl+N                   | Test Linux desktop notification delivery (live mode)            |
 | Ctrl+E                   | Enable/disable persistent media caching                         |
 | Ctrl+K                   | Clear saved media (not chat history or Downloads)               |
 | Ctrl+P                   | Toggle automatic inline image previews                          |
+| Ctrl+O                   | Enable/disable automatic mark-as-read                           |
+| Ctrl+M                   | Mute/unmute the selected chat across LINE clients               |
 | Ctrl+H outside insert    | Hide/show bottom keybind hints                                  |
 | ? outside insert         | Open scrollable keybind help; ? or Escape closes it             |
 | Ctrl+S in scroll mode    | Save the selected attachment to your system Downloads folder    |
 | Ctrl+T                   | Pick files and upload them immediately to the current chat      |
+| Ctrl+I                   | Pick PNG/JPEG images and send native LINE photo messages        |
+| Left click               | Select the clicked chat or message                              |
 | Ctrl+L                   | Start or retry QR login                                         |
 | Ctrl+Y                   | Confirm login when requested                                    |
 | Ctrl+X                   | Cancel login                                                    |
@@ -88,6 +93,30 @@ overwritten. Ctrl+T opens [Yazi](https://yazi-rs.github.io/docs/installation/) i
 same terminal. With Yazi's default keybindings, press **Space** to select each file,
 then **Enter** to confirm and upload the selection immediately; press **q** to cancel.
 Tuiline restores its interface when Yazi closes. Yazi does not need a desktop session.
+
+Ctrl+T always sends file attachments, including image files. Ctrl+I uses the same
+picker but sends native photos with LINE previews. Photos must be valid PNG/JPEG,
+at most 20 MiB, 8192 pixels per side, and 32 megapixels. Encrypted photos upload
+the same encrypted image as both original and preview (twice the upload bandwidth);
+plain photos upload only the original and let LINE generate previews. Ctrl+I requires enhanced keyboard
+support: legacy terminals send the same code for Ctrl+I and Tab, which remains
+pane navigation.
+
+Uploads do not lock navigation: scroll messages, switch panes, or click another
+chat while sending. Switching chats or pressing Escape stops the remaining queue,
+but cannot retract an in-flight send. The status line shows transfer progress;
+other sends stay disabled until the active request finishes. Success uses LINE's
+send acknowledgement, not an extra delivery-verification request. Attachment
+requests have a 90-second deadline; a timeout reports “Delivery unconfirmed—check
+LINE before retrying” without blocking navigation or automatically resending.
+Photo failures identify the failing stage (original upload, encrypted preview, or
+send acknowledgement) without exposing server bodies or writing diagnostic logs.
+Media completion and preview-update events update only the affected message,
+without a blocking full-account refresh. Confirmed uploads release Ctrl+I for the
+next photo immediately; inline thumbnails reuse the uploaded bytes locally.
+
+Clicking a chat selects and opens it; clicking a message marks that message in
+scroll mode. Modal views block selection clicks, and drafts are retained.
 
 If `yazi` is not installed on your `PATH` or cannot launch, enter paths in the
 terminal prompt. Separate multiple paths with spaces and quote names containing
@@ -181,8 +210,19 @@ when LINE supplies the total size, a percentage. Escape cancels the download.
 Outgoing messages show `✓` after sending and `✓✓` when a live read receipt is
 observed. In groups, this means at least one other member has read the message.
 Live read receipts are saved with cached messages; older reads not observed by
-this client cannot be inferred from LINE. The TUI
-does not automatically mark incoming messages as read.
+this client cannot be inferred from LINE. New message activity moves its chat
+to the top without changing the selected chat.
+Tuiline sends LINE read receipts for visible messages in the focused conversation
+(scroll or insert mode), after history finishes loading. Sidebar highlighting,
+cached history still loading, help/media overlays, and an unfocused terminal do
+not mark messages read. Focus detection relies on terminal focus-reporting
+support. Receipts are coalesced and the unread badge clears only after a
+successful receipt through the chat's newest message. Failures appear on the
+status line; return to the conversation to retry.
+Press `Ctrl+O` to disable or re-enable automatic read receipts; enabled is the
+default. The header shows `mark read: on/off`. The preference persists per
+account in the cache directory independently of disk media caching. Disabling
+cancels queued receipts but cannot undo a receipt already sent to LINE.
 
 Attachment sending, reactions, and message actions have no
 TUI controls yet. LINE currently returns only the latest 100 messages for a chat;
@@ -222,6 +262,34 @@ automatic resending; check LINE and refresh before deliberately trying again.
 Desktop notifications are enabled through `notify-send` while the app is running.
 Group notifications show the group name, sender, and message preview; direct
 notifications show the sender and message preview.
+Press `Ctrl+N` to test desktop delivery independently of incoming messages.
+Delivery failures appear on the status line, including errors connecting to the
+desktop session bus. A successful test means the desktop service accepted it;
+Do Not Disturb settings and notification rules can still hide the popup.
+`notify-send` must be available in the app's `PATH`, and tuiline must run in the
+desktop user's D-Bus session. Notifications are grouped and rate-limited; old
+replayed messages are not notified. New messages discovered by a background
+refresh also notify, even in chats that are not selected. The initial chat list
+establishes a baseline without notifying for existing history; opening older
+history does not trigger notifications. Live events and refresh results share
+deduplication so the same message cannot notify twice within the recent-message
+window. Startup/replay detection uses message IDs, not a narrow server-timestamp
+window. Delayed, missing, or clock-skewed message timestamps do not suppress new
+notifications; queued notifications expire based on local receipt time.
+Chats muted in LINE show `` after their name and do not produce desktop
+notifications (a font containing this icon is required). `Ctrl+M` changes the selected chat's notification setting on LINE,
+not just in tuiline; the setting is read back from LINE before the indicator changes.
+Direct chats use `updateContactSetting`; groups and rooms use `updateChat` while
+preserving the existing chat metadata. Failures show the operation stage and safe
+error details on the status line, without writing diagnostic logs. Refresh
+to pick up changes made on another device. In terminals that cannot distinguish
+Ctrl+M from Enter, the mute shortcut requires an enhanced keyboard protocol.
+Non-friend group senders have their display names resolved independently of
+avatar loading and reused for later live messages.
+
+Notification diagnostic tracing has been removed. Existing `notifications.log`
+and `notifications.log.1` files in the cache directory are left untouched and
+can be deleted manually. Delivery errors still appear on the status line.
 
 The original Telegram implementation is available with `npm run dev:telegram`;
 its original documentation is in [docs/TELEGRAM.md](docs/TELEGRAM.md). Existing

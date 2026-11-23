@@ -115,7 +115,7 @@ function parsePaths(value) {
   return paths.map((file) => path.resolve(file.replace(/^~(?=\/|$)/, homedir())));
 }
 
-function waitForState(backend, context, signal, command, check) {
+function waitForState(backend, context, signal, command, check, timeoutMs = 135000) {
   return new Promise((resolve, reject) => {
     let timer; // eslint-disable-line prefer-const
     const finish = (error, value) => {
@@ -143,13 +143,28 @@ function waitForState(backend, context, signal, command, check) {
     backend.on('state', onState);
     backend.on('failure', onFailure);
     signal?.addEventListener('abort', onAbort, { once: true });
-    timer = setTimeout(() => finish(new Error('Transfer timed out. Check LINE before retrying an upload.')), 135000);
+    timer = setTimeout(
+      () =>
+        finish(
+          new Error(
+            command.action === 'send'
+              ? 'Delivery unconfirmed—check LINE before retrying. Remaining files were not sent.'
+              : 'Transfer timed out.',
+          ),
+        ),
+      timeoutMs,
+    );
     if (signal?.aborted) onAbort();
     else backend.command(command);
   });
 }
 
-async function uploadFiles(backend, context, files, { signal, replyTo = '', onProgress = () => {} } = {}) {
+async function uploadFiles(
+  backend,
+  context,
+  files,
+  { signal, replyTo = '', image = false, onProgress = () => {}, timeoutMs = 95000 } = {},
+) {
   // Validate the whole selection before sending anything.
   const resolved = [];
   for (const file of files) {
@@ -161,19 +176,23 @@ async function uploadFiles(backend, context, files, { signal, replyTo = '', onPr
   }
   for (const [index, file] of resolved.entries()) {
     signal?.throwIfAborted();
-    onProgress(`Uploading ${index + 1}/${files.length}: ${path.basename(file)}`);
+    const label = `Uploading ${index + 1}/${files.length}: ${path.basename(file)}`;
+    onProgress(`${label} · Browse normally · Esc stops remaining files`);
     let attaching = false;
+    const command = { action: 'attach', ...context, url: pathToFileURL(file).href };
+    if (image) command.mode = 'image';
     const attachment = await waitForState(
       backend,
       context,
       signal,
-      { action: 'attach', ...context, url: pathToFileURL(file).href },
+      command,
       (view) => {
         if (view.fileStatus === 'pending') attaching = true;
         if (view.attachment) return view.attachment;
         if (attaching && view.fileStatus === 'idle' && view.sendNote) throw new Error(view.sendNote);
         return null;
       },
+      timeoutMs,
     );
     let pending = false;
     await waitForState(
@@ -182,12 +201,23 @@ async function uploadFiles(backend, context, files, { signal, replyTo = '', onPr
       signal,
       { action: 'send', ...context, text: '', attachmentId: attachment.id, replyTo: index === 0 ? replyTo : '' },
       (view) => {
-        if (view.sendStatus === 'pending') pending = true;
-        if (view.sendStatus === 'uncertain') {
-          throw new Error('Upload result uncertain. Check LINE before retrying; remaining files were not sent.');
+        if (view.sendStatus === 'pending') {
+          pending = true;
+          onProgress(`${label} · Waiting for LINE response · Browse normally · Esc stops remaining files`);
         }
-        return pending && view.sendStatus === 'idle' && !view.attachment;
+        if (view.sendStatus === 'uncertain') {
+          if (image && view.sendNote?.startsWith('Delivery unconfirmed: ')) {
+            throw new Error(view.sendNote);
+          }
+          throw new Error('Delivery unconfirmed—check LINE before retrying. Remaining files were not sent.');
+        }
+        // The attachment-specific acknowledgement survives coalesced frames;
+        // don't wait forever just because the pending frame wasn't delivered.
+        const acknowledged =
+          typeof view.sentAttachmentId === 'string' ? view.sentAttachmentId === attachment.id : pending;
+        return acknowledged && view.sendStatus === 'idle' && !view.attachment;
       },
+      timeoutMs,
     );
   }
 }

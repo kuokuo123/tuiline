@@ -10,6 +10,138 @@ const { Backend, resolveBackend } = require('../line-tui/backend');
 const { createApp, clean } = require('../line-tui/app');
 const { loadHintsVisible } = require('../line-tui/preferences');
 
+test('LINE mouse clicks select chats and individual messages, not pane focus', async (t) => {
+  const { createTestRenderer, createMockMouse } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 110, height: 25, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  backend.emit('state', {
+    mode: 'demo',
+    status: 'ready',
+    selectedId: 'alice',
+    session: 'demo',
+    selection: 1,
+    chats: [
+      { id: 'alice', name: 'Alice' },
+      { id: 'bob', name: 'Bob' },
+    ],
+    messages: [
+      { id: '1', sender: 'Alice', text: 'First' },
+      { id: '2', sender: 'Alice', text: 'Second' },
+      { id: '3', sender: 'Alice', text: 'Third' },
+    ],
+  });
+  await setup.renderOnce();
+  const mouse = createMockMouse(setup.renderer);
+  const bob = setup.renderer.root.findDescendantById('line-chat-1');
+  await mouse.click(bob.x + 5, bob.y);
+  await setup.renderOnce();
+  assert.ok(commands.some((command) => command.action === 'select' && command.id === 'bob'));
+  assert.equal(bob.focused, false);
+  assert.equal(bob.parent.focused, false, 'mouse selection must not focus the scrollbox');
+  const first = setup.renderer.root.findDescendantById('line-message-0');
+  // Click row padding rather than its text, exercising bubble and row routing.
+  await mouse.click(first.x + first.width - 2, first.y);
+  await setup.renderOnce();
+  const hintText = () =>
+    setup.renderer.root
+      .findDescendantById('line-hints')
+      .content.chunks.map((chunk) => chunk.text)
+      .join('');
+  assert.match(hintText(), /SCROLL \[1\/3\]/);
+  const second = setup.renderer.root.findDescendantById('line-message-1');
+  await mouse.click(second.x + 4, second.y + 1);
+  await setup.renderOnce();
+  assert.match(hintText(), /SCROLL \[2\/3\]/);
+  setup.mockInput.pressKey('?');
+  await setup.renderOnce();
+  const before = commands.filter((command) => command.action === 'select').length;
+  await mouse.click(bob.x + 3, bob.y);
+  assert.equal(commands.filter((command) => command.action === 'select').length, before);
+});
+
+test('LINE Ctrl+I selects photo upload while Tab keeps pane navigation', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 160, height: 25, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  const state = {
+    mode: 'demo',
+    status: 'ready',
+    selectedId: 'alice',
+    session: 'demo',
+    selection: 1,
+    chats: [{ id: 'alice', name: 'Alice' }],
+    messages: [],
+  };
+  backend.command = (command) => {
+    commands.push(command);
+    if (command.action === 'attach') {
+      backend.emit('state', { ...state, fileStatus: 'pending' });
+      backend.emit('state', { ...state, attachment: { id: 'photo', name: 'photo.png', image: true } });
+    }
+    if (command.action === 'send') {
+      backend.emit('state', { ...state, sendStatus: 'pending' });
+      backend.emit('state', { ...state, sendStatus: 'idle' });
+    }
+  };
+  backend.close = () => {};
+  let picks = 0;
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tuiline-photo-test-'));
+  const photo = path.join(directory, 'photo.png');
+  fs.writeFileSync(photo, 'backend validates image bytes');
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const app = await createApp(setup.renderer, backend, {
+    pickFiles: async () => {
+      picks++;
+      return [photo];
+    },
+  });
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  backend.emit('state', state);
+  await setup.renderOnce();
+  setup.mockInput.pressKey('tab');
+  assert.equal(picks, 0);
+  setup.mockInput.pressKey('i', { ctrl: true });
+  await new Promise((resolve) => {
+    backend.once('state', resolve);
+  });
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+  assert.equal(picks, 1);
+  assert.equal(commands.find((command) => command.action === 'attach').mode, 'image');
+  assert.ok(commands.some((command) => command.action === 'send'));
+  setup.mockInput.pressKey('i', { ctrl: true });
+  await new Promise((resolve) => {
+    backend.once('state', resolve);
+  });
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+  assert.equal(picks, 2, 'a confirmed photo upload must immediately release Ctrl+I');
+  assert.equal(commands.filter((command) => command.action === 'attach')[1].mode, 'image');
+  setup.mockInput.pressKey('t', { ctrl: true });
+  await new Promise((resolve) => {
+    backend.once('state', resolve);
+  });
+  await new Promise((resolve) => {
+    setImmediate(resolve);
+  });
+  assert.equal(picks, 3);
+  assert.equal(commands.filter((command) => command.action === 'attach')[2].mode, undefined);
+});
+
 test('LINE backend streams demo state and sends text without an account', async (t) => {
   let binary;
   try {
@@ -172,6 +304,166 @@ test('LINE status and notes share one row unless a reply needs its banner', asyn
   const replyLine = lines.findIndex((line) => line.includes('Reply to Alice'));
   assert.match(lines[replyLine + 1], /已連線 · Cache cleared/);
   assert.match(lines[replyLine + 2], /\^E cache/);
+  backend.emit('state', {
+    ...view,
+    notificationNote: 'Notifications: desktop bus unavailable',
+  });
+  await setup.renderOnce();
+  assert.match(setup.captureCharFrame(), /Notifications: desktop bus unavailable/);
+});
+
+test('Ctrl+N requests a desktop notification test in live mode', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 100, height: 20, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  backend.emit('state', { mode: 'live', chats: [], messages: [] });
+  setup.mockInput.pressKey('n', { ctrl: true });
+  assert.deepEqual(commands, [{ action: 'notification-test' }]);
+  backend.emit('state', { mode: 'demo', chats: [], messages: [] });
+  setup.mockInput.pressKey('n', { ctrl: true });
+  assert.equal(commands.length, 1);
+});
+
+test('chat reorder preserves the sidebar selection by chat ID', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 100, height: 22 });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const a = { id: 'a', name: 'Alice' };
+  const b = { id: 'b', name: 'Bob' };
+  backend.emit('state', { selectedId: 'a', chats: [a, b], messages: [] });
+  await setup.renderOnce();
+  backend.emit('state', { selectedId: 'a', chats: [b, a], messages: [] });
+  await setup.renderOnce();
+  assert.match(setup.captureCharFrame(), /› Alice/);
+  setup.mockInput.pressKey('k');
+  assert.deepEqual(commands.at(-1), { action: 'select', id: 'b' });
+});
+
+test('read receipts require loaded visible messages and focused conversation, not sidebar or overlays', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 100, height: 22, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const view = {
+    mode: 'live',
+    status: 'ready',
+    historyStatus: 'loading',
+    selectedId: 'chat',
+    session: 'session',
+    selection: 1,
+    chats: [{ id: 'chat', name: 'Alice', unread: 30 }],
+    messages: Array.from({ length: 30 }, (_, i) => ({ id: String(101 + i), text: `Message ${i + 1}` })),
+  };
+  const reads = () => commands.filter(({ action }) => action === 'read-visible');
+  backend.emit('state', view);
+  setup.mockInput.pressEnter();
+  await setup.renderOnce();
+  assert.equal(reads().length, 0, 'cached messages displayed while history loads must not mark read');
+  backend.emit('state', { ...view, historyStatus: 'ready' });
+  await setup.renderOnce();
+  assert.equal(reads().at(-1).messageId, '130');
+  assert.equal(reads().at(-1).focused, true);
+  const count = reads().length;
+  await setup.renderOnce();
+  assert.equal(reads().length, count, 'same visible cursor should not resend');
+  setup.renderer.emit('blur');
+  assert.equal(reads().at(-1).focused, false);
+  await setup.renderOnce();
+  assert.equal(reads().length, count + 1);
+  setup.renderer.emit('focus');
+  await setup.renderOnce();
+  assert.equal(reads().at(-1).focused, true);
+  const history = setup.renderer.root.findDescendantById('line-history');
+  history.scrollTo(0);
+  await setup.renderOnce();
+  assert.ok(Number(reads().at(-1).messageId) < 130, 'offscreen newest message must not be marked');
+  setup.mockInput.pressKey('?');
+  await setup.renderOnce();
+  assert.equal(reads().at(-1).focused, false);
+  setup.mockInput.pressEscape();
+  await setup.renderOnce();
+  assert.equal(reads().at(-1).focused, true);
+  setup.mockInput.pressKey('h');
+  await setup.renderOnce();
+  assert.equal(reads().at(-1).focused, false);
+});
+
+test('Ctrl+O gates read receipts and Ctrl+M toggles LINE mute with header, hints and help indicators', async (t) => {
+  const { createTestRenderer } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 130, height: 24, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const view = {
+    mode: 'live',
+    status: 'ready',
+    historyStatus: 'ready',
+    account: { id: 'account', name: 'Me' },
+    selectedId: 'chat',
+    session: 'session',
+    selection: 1,
+    markReadEnabled: true,
+    chats: [{ id: 'chat', name: 'Alice', muted: false }],
+    messages: [{ id: '101', text: 'Hello' }],
+  };
+  backend.emit('state', view);
+  setup.mockInput.pressEnter();
+  await setup.renderOnce();
+  assert.match(setup.captureCharFrame(), /mark read: on/);
+  assert.ok(commands.some(({ action, focused }) => action === 'read-visible' && focused));
+  setup.mockInput.pressKey('o', { ctrl: true });
+  assert.equal(commands.at(-1).action, 'mark-read-toggle');
+  backend.emit('state', { ...view, markReadEnabled: false });
+  await setup.renderOnce();
+  assert.match(setup.captureCharFrame(), /mark read: off/);
+  const count = commands.filter(({ action, focused }) => action === 'read-visible' && focused).length;
+  await setup.renderOnce();
+  assert.equal(commands.filter(({ action, focused }) => action === 'read-visible' && focused).length, count);
+  setup.mockInput.pressKey('m', { ctrl: true });
+  assert.deepEqual(commands.at(-1), {
+    action: 'chat-mute-toggle',
+    id: 'chat',
+    session: 'session',
+    selection: 1,
+  });
+  backend.emit('state', { ...view, markReadEnabled: false, chats: [{ ...view.chats[0], muted: true }] });
+  await setup.renderOnce();
+  assert.match(setup.captureCharFrame(), /Alice /);
+  const hints = setup.renderer.root.findDescendantById('line-hints').plainText;
+  assert.match(hints, /\^O read.*\^M mute/);
+  setup.mockInput.pressKey('?');
+  const help = setup.renderer.root.findDescendantById('line-keybind-text').plainText;
+  assert.match(help, /Ctrl\+O.*read receipts/);
+  assert.match(help, /Ctrl\+M.*LINE/);
 });
 
 test('Ctrl+H reclaims the hint row and saves visibility independently of the media cache', async (t) => {
@@ -194,7 +486,10 @@ test('Ctrl+H reclaims the hint row and saves visibility independently of the med
   const history = first.setup.renderer.root.findDescendantById('line-history');
   const height = history.viewport.height;
   assert.equal(hints.visible, true);
-  assert.match(first.setup.captureCharFrame(), /\^E cache.*\^K clear.*\^P preview.*\^H hints.*\? help/);
+  assert.match(
+    first.setup.captureCharFrame(),
+    /\^E cache · \^K clear · \^P preview · \^O read · \^M mute · \^H hints · \? help/,
+  );
   first.setup.mockInput.pressKey('h', { ctrl: true });
   await first.setup.renderOnce();
   assert.equal(hints.visible, false);

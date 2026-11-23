@@ -25,6 +25,10 @@ try {
     'internal/gui/images.go',
     'internal/gui/photos.go',
     'internal/gui/stickers.go',
+    'internal/gui/profiles.go',
+    'pkg/line/structs.go',
+    'internal/messaging/client.go',
+    'internal/messaging/files.go',
   ]) {
     const original = path.resolve(source, 'backend', name);
     const patched = path.join(temporary, name.replaceAll('/', '-'));
@@ -47,6 +51,34 @@ try {
     '../line-tui/backend/media_cache.go',
   );
   const testing = process.argv.includes('--test');
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_media_events.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/media_events.go',
+  );
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_photo_upload.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/gui_photo_upload.go',
+  );
+  replace[path.resolve(source, 'backend/internal/messaging/tuiline_photo_upload.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/photo_upload.go',
+  );
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_chat_settings.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/chat_settings.go',
+  );
+  replace[path.resolve(source, 'backend/pkg/line/tuiline_chat_settings.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/line_chat_settings.go',
+  );
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_incoming_activity.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/incoming_activity.go',
+  );
+  replace[path.resolve(source, 'backend/internal/gui/tuiline_notifications.go')] = path.resolve(
+    __dirname,
+    '../line-tui/backend/notifications.go',
+  );
   replace[path.resolve(source, 'backend/internal/gui/tuiline_sticker_cache.go')] = path.resolve(
     __dirname,
     '../line-tui/backend/sticker_cache.go',
@@ -64,6 +96,42 @@ try {
     '../line-tui/backend/gui_download_progress.go',
   );
   if (testing) {
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_media_events_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/media_events_test.go',
+    );
+    replace[path.resolve(source, 'backend/internal/events/tuiline_media_watch_events_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/media_watch_events_test.go',
+    );
+    replace[path.resolve(source, 'backend/pkg/line/tuiline_photo_upload_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/line_photo_upload_test.go',
+    );
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_photo_upload_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/gui_photo_upload_test.go',
+    );
+    replace[path.resolve(source, 'backend/internal/messaging/tuiline_photo_upload_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/photo_upload_test.go',
+    );
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_chat_settings_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/chat_settings_test.go',
+    );
+    replace[path.resolve(source, 'backend/pkg/line/tuiline_chat_settings_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/line_chat_settings_test.go',
+    );
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_incoming_activity_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/incoming_activity_test.go',
+    );
+    replace[path.resolve(source, 'backend/internal/gui/tuiline_notifications_test.go')] = path.resolve(
+      __dirname,
+      '../test/line-backend/notifications_test.go',
+    );
     replace[path.resolve(source, 'backend/internal/gui/tuiline_history_cache_test.go')] = path.resolve(
       __dirname,
       '../test/line-backend/history_cache_test.go',
@@ -111,6 +179,7 @@ try {
         './internal/events',
         './internal/messaging',
         './internal/session',
+        './pkg/line',
       ]
     : ['build', '-overlay', overlay, '-trimpath', '-buildvcs=false', '-o', output, './cmd/line-gui'];
   const result = spawnSync('go', args, {
