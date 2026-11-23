@@ -9,6 +9,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -212,6 +213,72 @@ func TestMediaCacheEvictsLeastRecentlyUsed(t *testing.T) {
 	if _, err := os.Stat(reopened.path("sticker", "new")); err != nil {
 		t.Fatalf("newest entry evicted: %v", err)
 	}
+}
+
+func TestMediaCacheIncrementalUsageAndPeriodicReconciliation(t *testing.T) {
+	cache := openMediaCache(filepath.Join(t.TempDir(), "tuiline", "media"), "u"+strings.Repeat("a", 43))
+	img := testMediaImage(t)
+	initialScan := cache.scannedAt
+	cache.save("thumbnail", "one", img)
+	cache.save("thumbnail", "two", img)
+	cache.save("thumbnail", "one", img)
+	var expected int64
+	for _, f := range cache.filesLocked() {
+		expected += f.size
+	}
+	if cache.usage() != expected || !cache.scannedAt.Equal(initialScan) {
+		t.Fatal("ordinary saves/usage rescanned the directory or miscounted replacements")
+	}
+	cache.remove("thumbnail", "one")
+	expected = 0
+	for _, f := range cache.filesLocked() {
+		expected += f.size
+	}
+	if cache.usage() != expected {
+		t.Fatal("removal did not decrement usage")
+	}
+	external := cache.path("thumbnail", "external")
+	if err := os.WriteFile(external, []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cache.scannedAt = time.Now().Add(-2 * time.Minute)
+	if cache.usage() != expected+2 {
+		t.Fatal("external cache changes were not reconciled")
+	}
+	cache.clear()
+	if cache.usage() != 0 || len(cache.index) != 0 {
+		t.Fatal("clear retained indexed bytes")
+	}
+}
+
+func BenchmarkMediaCacheUsage(b *testing.B) {
+	cache := openMediaCache(filepath.Join(b.TempDir(), "tuiline", "media"), "u"+strings.Repeat("a", 43))
+	for i := 0; i < 1000; i++ {
+		if err := os.WriteFile(cache.path("thumbnail", strconv.Itoa(i)), []byte("{}"), 0600); err != nil {
+			b.Fatal(err)
+		}
+	}
+	cache.reconcileLocked()
+	b.Run("directory-scan", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			var total int64
+			for _, f := range cache.filesLocked() {
+				total += f.size
+			}
+			if total == 0 {
+				b.Fatal("missing fixtures")
+			}
+		}
+	})
+	b.Run("incremental", func(b *testing.B) {
+		b.ReportAllocs()
+		for i := 0; i < b.N; i++ {
+			if cache.usage() == 0 {
+				b.Fatal("missing fixtures")
+			}
+		}
+	})
 }
 
 func TestStickerCatalogShowsCacheThenRefreshes(t *testing.T) {

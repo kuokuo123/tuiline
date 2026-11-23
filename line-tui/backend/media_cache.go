@@ -23,11 +23,15 @@ const mediaEntryLimit = 3 << 20
 const mediaLifetime = 90 * 24 * time.Hour
 
 type mediaCache struct {
-	mu      sync.Mutex
-	dir     string
-	enabled bool
-	budget  int64
-	version uint64
+	mu        sync.Mutex
+	dir       string
+	enabled   bool
+	budget    int64
+	version   uint64
+	index     map[string]cachedFile
+	bytes     int64
+	scannedAt time.Time
+	prunedAt  time.Time
 }
 
 type mediaDocument struct {
@@ -126,7 +130,9 @@ func (c *mediaCache) load(kind, key string) string {
 		return ""
 	}
 	now := time.Now()
-	_ = os.Chtimes(path, now, now)
+	if os.Chtimes(path, now, now) == nil {
+		c.recordLocked(path, info.Size(), now)
+	}
 	return doc.Data
 }
 
@@ -181,6 +187,7 @@ func (c *mediaCache) saveVersion(kind, key, data string, version uint64) {
 		return
 	}
 	if os.Rename(tmp.Name(), path) == nil {
+		c.recordLocked(path, int64(len(body)), time.Now())
 		c.pruneLocked()
 	}
 }
@@ -193,7 +200,12 @@ func (c *mediaCache) remove(kind, key string) {
 	defer c.mu.Unlock()
 	path := c.path(kind, key)
 	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
-		_ = os.Remove(path)
+		if os.Remove(path) == nil {
+			if old, ok := c.index[path]; ok {
+				c.bytes -= old.size
+				delete(c.index, path)
+			}
+		}
 	}
 }
 
@@ -355,6 +367,7 @@ func (c *mediaCache) clear() {
 		_ = os.Remove(file.path)
 	}
 	_ = os.Remove(filepath.Join(c.dir, "catalog.json"))
+	c.reconcileLocked()
 }
 
 type cachedFile struct {
@@ -392,30 +405,64 @@ func (c *mediaCache) usage() int64 {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	var size int64
+	c.ensureIndexLocked()
+	return c.bytes
+}
+
+func (c *mediaCache) reconcileLocked() {
+	c.index = map[string]cachedFile{}
+	c.bytes = 0
 	for _, f := range c.filesLocked() {
-		size += f.size
+		c.index[f.path] = f
+		c.bytes += f.size
 	}
-	return size
+	c.scannedAt = time.Now()
+}
+
+func (c *mediaCache) ensureIndexLocked() {
+	if c.index == nil || time.Since(c.scannedAt) >= time.Minute {
+		c.reconcileLocked()
+	}
+}
+
+func (c *mediaCache) recordLocked(path string, size int64, at time.Time) {
+	c.ensureIndexLocked()
+	if old, ok := c.index[path]; ok {
+		c.bytes -= old.size
+	}
+	c.index[path] = cachedFile{path: path, size: size, mod: at}
+	c.bytes += size
 }
 
 func (c *mediaCache) pruneLocked() {
-	files := c.filesLocked()
-	var total int64
-	for _, f := range files {
+	c.ensureIndexLocked()
+	if c.bytes <= c.budget && time.Since(c.prunedAt) < time.Minute {
+		return
+	}
+	c.prunedAt = time.Now()
+	for _, f := range c.index {
 		if time.Since(f.mod) > mediaLifetime || f.size > mediaEntryLimit {
-			_ = os.Remove(f.path)
-		} else {
-			total += f.size
+			if os.Remove(f.path) == nil {
+				c.bytes -= f.size
+				delete(c.index, f.path)
+			}
 		}
+	}
+	if c.bytes <= c.budget {
+		return
+	}
+	files := make([]cachedFile, 0, len(c.index))
+	for _, f := range c.index {
+		files = append(files, f)
 	}
 	sort.Slice(files, func(i, j int) bool { return files[i].mod.Before(files[j].mod) })
 	for _, f := range files {
-		if total <= c.budget {
+		if c.bytes <= c.budget {
 			break
 		}
-		if time.Since(f.mod) <= mediaLifetime && f.size <= mediaEntryLimit && os.Remove(f.path) == nil {
-			total -= f.size
+		if os.Remove(f.path) == nil {
+			c.bytes -= f.size
+			delete(c.index, f.path)
 		}
 	}
 }
