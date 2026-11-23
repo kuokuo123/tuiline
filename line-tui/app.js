@@ -613,12 +613,38 @@ async function createApp(
     Boolean(transferPicking || pathPrompt || expandedMessageId || videoController || linkChoices.length) ||
     stickerPicker.active ||
     mentionPicker.active;
+  const orderRows = (scroll, entries) => {
+    const parent = scroll.content;
+    const children = parent.getChildren();
+    // The empty-state label occupies slot zero, even when hidden.
+    for (const [index, { row }] of entries.entries()) {
+      const at = index + 1;
+      if (children[at] === row) continue;
+      const old = children.indexOf(row);
+      if (old >= 0) children.splice(old, 1);
+      if (children[at]) parent.insertBefore(row, children[at]);
+      else parent.add(row);
+      children.splice(at, 0, row);
+    }
+  };
   const paintChats = () => {
     const key = JSON.stringify(view.chats);
     if (key !== chatRowsKey) {
       chatRowsKey = key;
-      for (const { row } of chatRows) row.destroyRecursively();
+      const existing = new Map(chatRows.map((entry) => [entry.chatId, entry]));
+      const wanted = new Set(view.chats.map((chat) => chat.id));
+      for (const entry of chatRows) if (!wanted.has(entry.chatId)) entry.row.destroyRecursively();
       chatRows = view.chats.map((chat, index) => {
+        const entry = existing.get(chat.id);
+        const name = `${clean(chat.name)}${chat.muted ? ' ' : ''}${chat.unread ? ` (${chat.unread})` : ''}`;
+        const preview = clean(chat.preview).replace(/\n/g, ' ').slice(0, 70);
+        const labelText = `${name}\n${preview}`;
+        if (entry) {
+          entry.row.id = `line-chat-${index}`;
+          if (entry.labelText !== labelText) entry.label.content = labelText;
+          entry.labelText = labelText;
+          return entry;
+        }
         const row = new Box(renderer, {
           id: `line-chat-${index}`,
           width: '100%',
@@ -631,18 +657,16 @@ async function createApp(
             event.stopPropagation();
             if (event.button !== 0 || mouseSelectionBlocked()) return;
             flushDraft();
-            cursor = index;
+            cursor = chatRows.findIndex((item) => item.row === row);
             backend.command({ action: 'select', id: chat.id });
             focus('chats');
             paintChats();
           },
         });
         const marker = new Text(renderer, { width: 2, flexShrink: 0, content: ' ', fg: green });
-        const name = `${clean(chat.name)}${chat.muted ? ' ' : ''}${chat.unread ? ` (${chat.unread})` : ''}`;
-        const preview = clean(chat.preview).replace(/\n/g, ' ').slice(0, 70);
         row.add(marker);
         const label = new Text(renderer, {
-          content: `${name}\n${preview}`,
+          content: labelText,
           fg: theme.foreground,
           flexGrow: 1,
           flexShrink: 1,
@@ -650,11 +674,14 @@ async function createApp(
         });
         row.add(label);
         chats.add(row);
-        return { row, marker, label };
+        return { row, marker, label, chatId: chat.id, labelText };
       });
+      orderRows(chats, chatRows);
       emptyChats.visible = !chatRows.length;
     }
     for (const [index, { row, marker, label }] of chatRows.entries()) {
+      if (chatRows[index].selected === (index === cursor)) continue;
+      chatRows[index].selected = index === cursor;
       marker.content = index === cursor ? '›' : ' ';
       row.backgroundColor = index === cursor ? theme.chatSelectionBackground : 'transparent';
       label.fg = index === cursor ? theme.selectionForeground : theme.foreground;
@@ -874,7 +901,11 @@ async function createApp(
       const previousId = messageRows[messageCursor]?.message.id;
       if (changed || !messageRows.length) openAtBottom = true;
       const following = !messageRows.length || messageCursor === messageRows.length - 1;
-      for (const { row } of messageRows) row.destroyRecursively();
+      const existing = new Map(changed ? [] : messageRows.map((entry) => [entry.message.id, entry]));
+      const wanted = new Set(view.messages.map((message) => message.id));
+      for (const entry of messageRows) {
+        if (changed || !wanted.has(entry.message.id)) entry.row.destroyRecursively();
+      }
       messageCursor =
         changed || following
           ? Math.max(0, view.messages.length - 1)
@@ -897,6 +928,21 @@ async function createApp(
         return bodyText;
       });
       messageRows = view.messages.map((message, index) => {
+        const bodyText = messageTexts[index];
+        const entry = existing.get(message.id);
+        if (entry) {
+          entry.row.id = `line-message-${index}`;
+          entry.marker.id = `line-message-marker-${index}`;
+          entry.image.id = `line-image-${index}`;
+          if (entry.bodyText !== bodyText || entry.message.own !== message.own) {
+            entry.text.content = bodyText;
+            entry.content.width = message.own ? 40 : Math.max(...bodyText.split('\n').map((line) => stringWidth(line)));
+            entry.row.justifyContent = message.own ? 'flex-end' : 'flex-start';
+          }
+          entry.bodyText = bodyText;
+          entry.message = message;
+          return entry;
+        }
         const row = new Box(renderer, {
           id: `line-message-${index}`,
           backgroundColor:
@@ -913,7 +959,7 @@ async function createApp(
             flushDraft();
             // Avoid focus()'s keyboard-only jump to the final message.
             if (mode === 'chats') mode = 'history';
-            messageCursor = index;
+            messageCursor = messageRows.findIndex((item) => item.row === row);
             openAtBottom = false;
             focus('history');
           },
@@ -926,7 +972,6 @@ async function createApp(
           fg: green,
           content: mode === 'history' && index === messageCursor ? '›' : ' ',
         });
-        const bodyText = messageTexts[index];
         row.add(marker);
         const content = new Box(renderer, {
           flexDirection: 'column',
@@ -957,8 +1002,9 @@ async function createApp(
         content.add(image);
         row.add(content);
         history.add(row);
-        return { row, marker, message, image, text };
+        return { row, marker, message, image, text, content, bodyText };
       });
+      orderRows(history, messageRows);
       emptyMessages.visible = !messageRows.length;
       emptyMessages.content = 'No messages loaded.';
       if (changed) {

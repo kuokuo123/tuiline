@@ -10,6 +10,76 @@ const { Backend, resolveBackend } = require('../line-tui/backend');
 const { createApp, clean } = require('../line-tui/app');
 const { loadHintsVisible } = require('../line-tui/preferences');
 
+test('chat and message rows are reused across updates and reorder, with current mouse targets', async (t) => {
+  const { createTestRenderer, createMockMouse } = await import('@opentui/core/testing');
+  const setup = await createTestRenderer({ width: 110, height: 25, kittyKeyboard: true });
+  const backend = new EventEmitter();
+  const commands = [];
+  backend.command = (command) => commands.push(command);
+  backend.close = () => {};
+  const app = await createApp(setup.renderer, backend);
+  t.after(() => {
+    app.dispose();
+    setup.renderer.destroy();
+  });
+  const state = {
+    mode: 'demo',
+    status: 'ready',
+    session: 'test',
+    selection: 1,
+    selectedId: 'alice',
+    chats: [
+      { id: 'alice', name: 'Alice' },
+      { id: 'bob', name: 'Bob' },
+    ],
+    messages: [
+      { id: '1', text: 'First' },
+      { id: '2', own: true, text: 'Second', status: 'ok' },
+    ],
+  };
+  backend.emit('state', state);
+  await setup.renderOnce();
+  const find = (id) => setup.renderer.root.findDescendantById(id);
+  const alice = find('line-chat-0'),
+    bob = find('line-chat-1');
+  const first = find('line-message-0'),
+    second = find('line-message-1');
+  backend.emit('state', {
+    ...state,
+    chats: [{ ...state.chats[0], preview: 'Changed preview' }, state.chats[1]],
+    messages: [state.messages[0], { ...state.messages[1], read: true }],
+  });
+  await setup.renderOnce();
+  assert.equal(find('line-chat-0'), alice);
+  assert.equal(find('line-chat-1'), bob);
+  assert.equal(find('line-message-0'), first);
+  assert.equal(find('line-message-1'), second);
+  assert.match(setup.captureCharFrame(), /✓✓/);
+  const reordered = {
+    ...state,
+    chats: [state.chats[1], state.chats[0]],
+    messages: [{ id: '0', text: 'Earlier' }, ...state.messages],
+  };
+  backend.emit('state', reordered);
+  await setup.renderOnce();
+  assert.equal(find('line-chat-0'), bob);
+  assert.equal(find('line-chat-1'), alice);
+  assert.equal(find('line-message-1'), first);
+  assert.equal(find('line-message-2'), second);
+  const mouse = createMockMouse(setup.renderer);
+  await mouse.click(bob.x + 4, bob.y);
+  assert.equal(commands.findLast((command) => command.action === 'select').id, 'bob');
+  await mouse.click(first.x + 4, first.y);
+  await setup.renderOnce();
+  const hint = find('line-hints').plainText;
+  assert.match(hint, /SCROLL \[2\/3\]/);
+  backend.emit('state', { ...state, chats: [state.chats[0]], messages: [state.messages[1]] });
+  await setup.renderOnce();
+  assert.equal(bob.isDestroyed, true);
+  assert.equal(first.isDestroyed, true);
+  assert.equal(find('line-message-0'), second);
+});
+
 test('LINE mouse clicks select chats and individual messages, not pane focus', async (t) => {
   const { createTestRenderer, createMockMouse } = await import('@opentui/core/testing');
   const setup = await createTestRenderer({ width: 110, height: 25, kittyKeyboard: true });
